@@ -23,13 +23,13 @@
 
 use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 use tracing::debug;
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetAncestor, GetWindowTextW, IsWindowVisible, PostThreadMessageW, EVENT_OBJECT_CREATE,
-    EVENT_OBJECT_DESTROY, EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW, GA_ROOT,
-    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
+    EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW, GA_ROOT,
+    INDEXID_CONTAINER, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 
 use crate::uncombine::UncombineManager;
@@ -69,7 +69,7 @@ pub unsafe fn install_hook(uncombine: &'static UncombineManager) -> anyhow::Resu
 
     let hook = SetWinEventHook(
         EVENT_OBJECT_CREATE,
-        EVENT_OBJECT_NAMECHANGE,
+        EVENT_OBJECT_HIDE,
         None,
         Some(win_event_proc),
         0,
@@ -130,7 +130,7 @@ unsafe extern "system" fn win_event_proc(
     _event_thread: u32,
     _event_time: u32,
 ) {
-    if id_object != 0 || id_child != 0 {
+    if id_object != OBJID_WINDOW.0 || id_child != INDEXID_CONTAINER as i32 {
         return;
     }
 
@@ -169,16 +169,25 @@ unsafe extern "system" fn win_event_proc(
             let _ = PostThreadMessageW(
                 thread_id,
                 WM_APP_UNCOMBINE,
-                windows::Win32::Foundation::WPARAM(hwnd.0 as usize),
-                windows::Win32::Foundation::LPARAM(0),
+                WPARAM(hwnd.0 as usize),
+                LPARAM(0),
             );
         }
-        EVENT_OBJECT_DESTROY => {
+        EVENT_OBJECT_HIDE => {
+            if GetAncestor(hwnd, GA_ROOT) != hwnd {
+                return;
+            }
+
+            let mut title_buf = [0u16; 256];
+            if GetWindowTextW(hwnd, &mut title_buf) == 0 {
+                return;
+            }
+
             let _ = PostThreadMessageW(
                 thread_id,
                 WM_APP_INVALIDATE_CACHE,
-                windows::Win32::Foundation::WPARAM(0),
-                windows::Win32::Foundation::LPARAM(0),
+                WPARAM(hwnd.0 as usize),
+                LPARAM(EVENT_OBJECT_HIDE as isize),
             );
         }
         EVENT_OBJECT_NAMECHANGE => {
@@ -193,12 +202,11 @@ unsafe extern "system" fn win_event_proc(
                 return;
             }
 
-            let title = String::from_utf16_lossy(&title_buf[..]);
             let _ = PostThreadMessageW(
                 thread_id,
                 WM_APP_INVALIDATE_CACHE,
-                windows::Win32::Foundation::WPARAM(0),
-                windows::Win32::Foundation::LPARAM(0),
+                WPARAM(hwnd.0 as usize),
+                LPARAM(EVENT_OBJECT_NAMECHANGE as isize),
             );
         }
         _ => {}

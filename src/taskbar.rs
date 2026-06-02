@@ -65,7 +65,7 @@ use windows::Win32::UI::Accessibility::{
 use windows::Win32::UI::WindowsAndMessaging::{FindWindowExW, FindWindowW};
 
 use crate::switcher::{
-    find_visible_windows, find_window_for_button_cached, find_windows_for_button_cached, WindowInfo,
+    find_visible_windows, find_window_for_button, find_windows_for_button, WindowInfo,
 };
 
 /// Hướng cycle: trái hoặc phải trên taskbar.
@@ -309,12 +309,7 @@ impl TaskbarEnumerator {
         );
 
         if combine_enabled {
-            let windows = find_windows_for_button_cached(
-                &target_button.name,
-                target_button.process_id,
-                target_button.automation_id.as_deref(),
-                &all_windows,
-            );
+            let windows = find_windows_for_button(&target_button, &all_windows);
 
             let is_grouped = windows.len() > 1;
 
@@ -326,19 +321,15 @@ impl TaskbarEnumerator {
                 window_rect: w.rect,
             }))
         } else {
-            Ok(find_window_for_button_cached(
-                &target_button.name,
-                target_button.process_id,
-                target_button.automation_id.as_deref(),
-                &all_windows,
+            Ok(
+                find_window_for_button(&target_button, &all_windows).map(|w| CycleEntry {
+                    name: w.title,
+                    hwnd: w.hwnd,
+                    taskbar_left: target_button.rect.left,
+                    is_grouped: false,
+                    window_rect: w.rect,
+                }),
             )
-            .map(|w| CycleEntry {
-                name: w.title,
-                hwnd: w.hwnd,
-                taskbar_left: target_button.rect.left,
-                is_grouped: false,
-                window_rect: w.rect,
-            }))
         }
     }
 
@@ -385,12 +376,7 @@ impl TaskbarEnumerator {
                 // Nếu combine_enabled là true, tìm các cửa sổ trong group button/không phải group
                 // button và thêm vào entries
                 true => {
-                    let windows = find_windows_for_button_cached(
-                        &button.name,
-                        button.process_id,
-                        button.automation_id.as_deref(),
-                        &all_windows,
-                    );
+                    let windows = find_windows_for_button(button, &all_windows);
 
                     let is_grouped = windows.len() > 1;
 
@@ -406,12 +392,7 @@ impl TaskbarEnumerator {
                 }
                 // Nếu combine_enabled là false, chỉ tìm cửa sổ duy nhất và thêm vào entries
                 false => {
-                    let window = find_window_for_button_cached(
-                        &button.name,
-                        button.process_id,
-                        button.automation_id.as_deref(),
-                        &all_windows,
-                    );
+                    let window = find_window_for_button(button, &all_windows);
 
                     match window {
                         Some(w) => {
@@ -553,8 +534,7 @@ impl TaskbarEnumerator {
                     Err(_) => continue, // Button không có rect hợp lệ -> bỏ qua
                 };
 
-                // Lấy PID (để match với window thực)
-                // ⚠️ Thường là explorer.exe PID, không phải app PID!
+                // Lấy PID (để match với window thực, trường hợp này không mấy khả thi)
                 let process_id = item.CurrentProcessId().unwrap_or(0);
 
                 // Lấy AutomationID (có thể chứa AppUserModelID hoặc dùng để match)
@@ -688,12 +668,7 @@ impl TaskbarEnumerator {
         let fg_name = fg_info.map(|w| w.title.as_str()).unwrap_or("<unknown>");
 
         for (i, button) in buttons.iter().enumerate() {
-            let windows = find_windows_for_button_cached(
-                &button.name,
-                button.process_id,
-                button.automation_id.as_deref(),
-                all_windows,
-            );
+            let windows = find_windows_for_button(button, all_windows);
 
             if windows.iter().any(|w| w.hwnd == foreground_hwnd) {
                 debug!(
