@@ -134,23 +134,23 @@ pub fn reset_cache_invalidated_flag() {
 #[repr(usize)]
 #[derive(Debug, Clone, Copy)]
 pub enum InvalidateSource {
-    UiaChildAdded = 0,
-    UiaChildRemoved = 1,
-    UiaChildrenInvalidated = 2,
-    UiaChildrenBulkAdded = 3,
-    UiaChildrenBulkRemoved = 4,
+    ButtonAdded = 0,
+    ButtonRemoved = 1,
+    ButtonInvalidated = 2,
+    ButtonBulkAdded = 3,
+    ButtonBulkRemoved = 4,
     DesktopSwitch = 100,
 }
 
 impl fmt::Display for InvalidateSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match self {
-            InvalidateSource::UiaChildAdded => "UiaChildAdded",
-            InvalidateSource::UiaChildRemoved => "UiaChildRemoved",
-            InvalidateSource::UiaChildrenInvalidated => "UiaChildrenInvalidated",
-            InvalidateSource::UiaChildrenBulkAdded => "UiaChildrenBulkAdded",
-            InvalidateSource::UiaChildrenBulkRemoved => "UiaChildrenBulkRemoved",
-            InvalidateSource::DesktopSwitch => "DesktopSwitch",
+            InvalidateSource::ButtonAdded => "Taskbar button added",
+            InvalidateSource::ButtonRemoved => "Taskbar button removed",
+            InvalidateSource::ButtonInvalidated => "Taskbar button invalidated",
+            InvalidateSource::ButtonBulkAdded => "Taskbar button bulk added",
+            InvalidateSource::ButtonBulkRemoved => "Taskbar button bulk removed",
+            InvalidateSource::DesktopSwitch => "Desktop switch",
         };
 
         write!(f, "{}", name)
@@ -161,11 +161,11 @@ impl InvalidateSource {
     /// Chuyển từ WPARAM `usize` về enum (safe, không transmute).
     pub fn from_wparam(wparam: usize) -> Self {
         match wparam {
-            0 => Self::UiaChildAdded,
-            1 => Self::UiaChildRemoved,
-            2 => Self::UiaChildrenInvalidated,
-            3 => Self::UiaChildrenBulkAdded,
-            4 => Self::UiaChildrenBulkRemoved,
+            0 => Self::ButtonAdded,
+            1 => Self::ButtonRemoved,
+            2 => Self::ButtonInvalidated,
+            3 => Self::ButtonBulkAdded,
+            4 => Self::ButtonBulkRemoved,
             _ => Self::DesktopSwitch,
         }
     }

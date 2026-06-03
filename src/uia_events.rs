@@ -23,8 +23,9 @@ use windows::Win32::UI::Accessibility::{
     StructureChangeType_ChildrenBulkAdded, StructureChangeType_ChildrenBulkRemoved,
     StructureChangeType_ChildrenInvalidated, TreeScope_Subtree,
 };
+use windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW;
 
-use crate::winevent::{CACHE_INVALIDATED, WM_APP_INVALIDATE_CACHE};
+use crate::winevent::{InvalidateSource, CACHE_INVALIDATED, WM_APP_INVALIDATE_CACHE};
 
 static MAIN_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 static HANDLER_PTR: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
@@ -48,25 +49,24 @@ impl IUIAutomationStructureChangedEventHandler_Impl for StructureChangedHandler_
             return Ok(());
         }
 
-        match changetype {
-            t if t == StructureChangeType_ChildAdded
-                || t == StructureChangeType_ChildRemoved
-                || t == StructureChangeType_ChildrenInvalidated
-                || t == StructureChangeType_ChildrenBulkAdded
-                || t == StructureChangeType_ChildrenBulkRemoved =>
-            {
-                if !CACHE_INVALIDATED.swap(true, Ordering::SeqCst) {
-                    unsafe {
-                        let _ = windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW(
-                            thread_id,
-                            WM_APP_INVALIDATE_CACHE,
-                            WPARAM(changetype.0 as usize),
-                            LPARAM(0),
-                        );
-                    }
+        if let Some(source) = match changetype {
+            StructureChangeType_ChildAdded => Some(InvalidateSource::ButtonAdded),
+            StructureChangeType_ChildRemoved => Some(InvalidateSource::ButtonRemoved),
+            StructureChangeType_ChildrenInvalidated => Some(InvalidateSource::ButtonInvalidated),
+            StructureChangeType_ChildrenBulkAdded => Some(InvalidateSource::ButtonBulkAdded),
+            StructureChangeType_ChildrenBulkRemoved => Some(InvalidateSource::ButtonBulkRemoved),
+            _ => None,
+        } {
+            if !CACHE_INVALIDATED.swap(true, Ordering::SeqCst) {
+                unsafe {
+                    let _ = PostThreadMessageW(
+                        thread_id,
+                        WM_APP_INVALIDATE_CACHE,
+                        WPARAM(source as usize),
+                        LPARAM(0),
+                    );
                 }
             }
-            _ => {}
         }
 
         Ok(())
