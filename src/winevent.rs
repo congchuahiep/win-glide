@@ -1,27 +1,14 @@
-//! WinEvent hook để phát hiện cửa sổ mới và uncombine ngay lập tức.
+//! WinEvent hook — chỉ theo dõi EVENT_OBJECT_SHOW cho uncombine.
 //!
-//! # Tại sao dùng WinEvent?
+//! # Cache invalidation
 //!
-//! Khi app đang chạy ở chế độ uncombine, các cửa sổ **mới mở** sau khi app start
-//! cũng cần được uncombine. Thay vì polling (lặp vô hạn quét window), ta dùng
-//! Windows Accessibility API `SetWinEventHook` để đăng ký callback.
-//!
-//! Mỗi khi có cửa sổ mới hiển thị (`EVENT_OBJECT_SHOW`), Windows gọi callback
-//! của ta trên một **thread riêng**. Callback gửi custom message (`WM_APP_UNCOMBINE`)
-//! đến main thread để xử lý uncombine an toàn.
-//!
-//! # Luồng hoạt động
-//!
-//! ```text
-//! Windows: cửa sổ mới hiển thị
-//!   → win_event_proc() trên thread của Windows
-//!     → filter (visible, top-level, có title, chưa track)
-//!     → PostThreadMessageW(MAIN_THREAD_ID, WM_APP_UNCOMBINE, hwnd)
-//!       → Main thread: GetMessageW() nhận WM_APP_UNCOMBINE
-//!         → uncombine.uncombine_one(hwnd)
-//! ```
+//! Cache invalidation hiện được xử lý bởi UIA events (uia_events.rs).
+//! Các WinEvent HIDE/DESTROY/NAMECHANGE đã bị vô hiệu hoá tạm thời
+//! để kiểm tra UIA hoạt động tốt không. Event REORDER bị xoá vì
+//! không fire trên Win11 XAML taskbar.
 
-use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
+use std::fmt::{self, Display};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 use tracing::debug;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
@@ -33,31 +20,17 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::uncombine::UncombineManager;
 
-/// Custom message ID gửi từ WinEvent callback đến main thread khi có cửa sổ mới.
-///
-/// `WM_USER + 0x100` đảm bảo không trùng với message hệ thống.
 pub const WM_APP_UNCOMBINE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 0x100;
+pub const WM_APP_INVALIDATE_CACHE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 0x101;
 
 static HOOK_HANDLE: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
 static MAIN_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 static UNCOMBINE: AtomicPtr<UncombineManager> = AtomicPtr::new(std::ptr::null_mut());
 
-/// Cài đặt WinEvent hook để bắt sự kiện cửa sổ mới.
-///
-/// # Tham số
-///
-/// * `uncombine` — Reference `'static` đến UncombineManager (tạo bằng `Box::leak`)
-///
-/// # Safety
-///
-/// Hàm này là `unsafe` vì gọi Windows API và đăng ký callback C-style.
-///
-/// # Ví dụ
-///
-/// ```rust,ignore
-/// let uncombine: &'static UncombineManager = Box::leak(Box::new(UncombineManager::new()));
-/// unsafe { winevent::install_hook(uncombine)?; }
-/// ```
+/// Cờ chống gửi message trùng. Dùng bởi UIA events (uia_events.rs).
+pub static CACHE_INVALIDATED: AtomicBool = AtomicBool::new(false);
+
+/// Cài đặt WinEvent hook chỉ cho EVENT_OBJECT_SHOW (uncombine).
 pub unsafe fn install_hook(uncombine: &'static UncombineManager) -> anyhow::Result<()> {
     MAIN_THREAD_ID.store(GetCurrentThreadId(), Ordering::SeqCst);
     UNCOMBINE.store(uncombine as *const _ as *mut _, Ordering::SeqCst);
@@ -77,17 +50,11 @@ pub unsafe fn install_hook(uncombine: &'static UncombineManager) -> anyhow::Resu
     }
 
     HOOK_HANDLE.store(hook.0, Ordering::SeqCst);
-    debug!("WinEvent hook installed (EVENT_OBJECT_SHOW)");
+    debug!("WinEvent hook installed (EVENT_OBJECT_SHOW only)");
     Ok(())
 }
 
 /// Gỡ bỏ WinEvent hook.
-///
-/// Gọi khi app thoát. Sau khi gọi, callback sẽ không được trigger nữa.
-///
-/// # Safety
-///
-/// Phải được gọi trên cùng thread với `install_hook`.
 pub unsafe fn uninstall_hook() {
     let handle_ptr = HOOK_HANDLE.load(Ordering::SeqCst);
     if !handle_ptr.is_null() {
@@ -99,26 +66,10 @@ pub unsafe fn uninstall_hook() {
     }
 }
 
-/// Callback được Windows gọi mỗi khi có UI object hiển thị.
-///
-/// Chạy trên **main thread** (do WINEVENT_OUTOFCONTEXT).
-/// Tuy nhiên callback có thể bị gọi bất kỳ lúc nào trong quá trình
-/// dispatch message — gây reentrancy nếu gọi COM trực tiếp.
-/// Vì vậy chỉ filter nhẹ rồi PostThreadMessageW về main loop.
-///
-/// # Filter chain
-///
-/// ```text
-/// 1. id_object == 0 && id_child == 0    → chỉ root window object
-/// 2. event == EVENT_OBJECT_SHOW         → chỉ event show (không hide/create/destroy)
-/// 3. IsWindowVisible(hwnd)              → cửa sổ đang visible
-/// 4. GetAncestor(GA_ROOT) == hwnd       → top-level window (không child control)
-/// 5. GetWindowTextW > 0                 → có title (lọc system window)
-/// 6. !uncombine.is_tracked(hwnd)        → chưa được uncombine
-/// ```
+/// Callback WinEvent — chỉ xử lý EVENT_OBJECT_SHOW cho uncombine.
 unsafe extern "system" fn win_event_proc(
     _hook: HWINEVENTHOOK,
-    _event: u32,
+    event: u32,
     hwnd: HWND,
     id_object: i32,
     id_child: i32,
@@ -130,6 +81,10 @@ unsafe extern "system" fn win_event_proc(
     }
 
     if hwnd.0.is_null() {
+        return;
+    }
+
+    if event != EVENT_OBJECT_SHOW {
         return;
     }
 
@@ -146,6 +101,11 @@ unsafe extern "system" fn win_event_proc(
         return;
     }
 
+    let thread_id = MAIN_THREAD_ID.load(Ordering::SeqCst);
+    if thread_id == 0 {
+        return;
+    }
+
     let uncombine_ptr = UNCOMBINE.load(Ordering::SeqCst);
     if uncombine_ptr.is_null() {
         return;
@@ -156,16 +116,57 @@ unsafe extern "system" fn win_event_proc(
         return;
     }
 
-    let thread_id = MAIN_THREAD_ID.load(Ordering::SeqCst);
-    if thread_id == 0 {
-        return;
-    }
-
-    debug!("WinEvent: new window detected, hwnd={:?}", hwnd);
+    debug!("WinEvent: SHOW hwnd={:?}", hwnd);
     let _ = PostThreadMessageW(
         thread_id,
         WM_APP_UNCOMBINE,
         WPARAM(hwnd.0 as usize),
         LPARAM(0),
     );
+}
+
+/// Reset cờ "cache invalidated" sau khi main thread đã xử lý.
+pub fn reset_cache_invalidated_flag() {
+    CACHE_INVALIDATED.store(false, Ordering::SeqCst);
+}
+
+/// Loại sự kiện gây ra cache invalidation (truyền qua WPARAM).
+#[repr(usize)]
+#[derive(Debug, Clone, Copy)]
+pub enum InvalidateSource {
+    UiaChildAdded = 0,
+    UiaChildRemoved = 1,
+    UiaChildrenInvalidated = 2,
+    UiaChildrenBulkAdded = 3,
+    UiaChildrenBulkRemoved = 4,
+    DesktopSwitch = 100,
+}
+
+impl fmt::Display for InvalidateSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            InvalidateSource::UiaChildAdded => "UiaChildAdded",
+            InvalidateSource::UiaChildRemoved => "UiaChildRemoved",
+            InvalidateSource::UiaChildrenInvalidated => "UiaChildrenInvalidated",
+            InvalidateSource::UiaChildrenBulkAdded => "UiaChildrenBulkAdded",
+            InvalidateSource::UiaChildrenBulkRemoved => "UiaChildrenBulkRemoved",
+            InvalidateSource::DesktopSwitch => "DesktopSwitch",
+        };
+
+        write!(f, "{}", name)
+    }
+}
+
+impl InvalidateSource {
+    /// Chuyển từ WPARAM `usize` về enum (safe, không transmute).
+    pub fn from_wparam(wparam: usize) -> Self {
+        match wparam {
+            0 => Self::UiaChildAdded,
+            1 => Self::UiaChildRemoved,
+            2 => Self::UiaChildrenInvalidated,
+            3 => Self::UiaChildrenBulkAdded,
+            4 => Self::UiaChildrenBulkRemoved,
+            _ => Self::DesktopSwitch,
+        }
+    }
 }

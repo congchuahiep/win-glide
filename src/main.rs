@@ -3,6 +3,7 @@ mod logging;
 mod switcher;
 mod taskbar;
 mod temp;
+mod uia_events;
 mod uncombine;
 mod utils;
 mod winevent;
@@ -10,6 +11,7 @@ mod winevent;
 use crate::hotkey::{HotkeyAction, HotkeyManager};
 use crate::uncombine::UncombineManager;
 use crate::utils::truncate;
+use crate::winevent::InvalidateSource;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use taskbar::{CycleDirection, TaskbarEnumerator};
@@ -88,6 +90,7 @@ fn main() -> anyhow::Result<()> {
     let hotkey_manager = HotkeyManager::new()?;
 
     let main_thread_id = unsafe { GetCurrentThreadId() };
+
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
 
@@ -109,6 +112,7 @@ fn main() -> anyhow::Result<()> {
         let uncombine: &'static UncombineManager = Box::leak(Box::new(UncombineManager::new()));
         let mut msg = std::mem::zeroed();
         winevent::install_hook(uncombine)?;
+        enumerator.install_uia_handler(main_thread_id)?;
 
         if !combine_enabled {
             uncombine.uncombine_all();
@@ -118,7 +122,7 @@ fn main() -> anyhow::Result<()> {
             let result = GetMessageW(&mut msg, None, 0, 0);
 
             if result.0 == 0 {
-                // WM_QUIT — cleanup và thoát
+                enumerator.uninstall_uia_handler();
                 winevent::uninstall_hook();
                 hotkey_manager.unregister_all();
 
@@ -156,8 +160,15 @@ fn main() -> anyhow::Result<()> {
                     let _guard = debug_span!("winevent", event = "UNCOMBINE").entered();
                     debug!("hwnd={:?}", hwnd);
                     if !combine_enabled {
-                        uncombine.uncombine_one(hwnd, || {});
+                        uncombine.uncombine_one(hwnd, || enumerator.invalidate_cache());
                     }
+                }
+                winevent::WM_APP_INVALIDATE_CACHE => {
+                    let source = InvalidateSource::from_wparam(msg.wParam.0);
+                    let _guard =
+                        debug_span!("winevent", event = "INVALIDATE_CACHE", %source).entered();
+                    enumerator.invalidate_cache();
+                    winevent::reset_cache_invalidated_flag();
                 }
                 _ => {}
             }

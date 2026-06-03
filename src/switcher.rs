@@ -138,7 +138,7 @@ fn get_process_name(pid: u32) -> String {
 /// Lấy AppUserModelID từ một window.
 /// Đây là cơ chế CHÍNH THỨC Windows dùng để group taskbar buttons.
 /// Nếu window không có AppUserModelID, trả về None.
-fn get_app_user_model_id(hwnd: HWND) -> Option<String> {
+pub fn get_app_user_model_id(hwnd: HWND) -> Option<String> {
     unsafe {
         let store: IPropertyStore = match SHGetPropertyStoreForWindow(hwnd) {
             Ok(s) => s,
@@ -169,6 +169,7 @@ fn get_app_user_model_id(hwnd: HWND) -> Option<String> {
     }
 }
 
+#[instrument(level = "debug", skip_all)]
 pub fn find_visible_windows() -> Vec<WindowInfo> {
     let mut data = EnumData {
         windows: Vec::new(),
@@ -212,16 +213,15 @@ unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> B
     let _ = GetWindowRect(hwnd, &mut rect);
 
     let process_name = get_process_name(pid);
-    let app_user_model_id = get_app_user_model_id(hwnd);
 
     let data = &mut *(lparam.0 as *mut EnumData);
     data.windows.push(WindowInfo {
         hwnd,
         title,
-        process_id: pid,
         rect,
         process_name,
-        app_user_model_id,
+        process_id: pid,
+        app_user_model_id: None,
     });
 
     TRUE
@@ -236,7 +236,7 @@ unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> B
 /// 4. Process name matching (so khớp tên file thực thi với button name)
 ///
 /// # Returns
-/// Danh sách windows matched — 1 phần tử nếu không phải group, N phần tử nếu group.
+/// Danh sách windows matched - 1 phần tử nếu không phải group, N phần tử nếu group.
 fn match_windows_for_button(button: &TaskbarButton, all_windows: &[WindowInfo]) -> Vec<WindowInfo> {
     let explorer_pid = get_explorer_pid();
     let pid_is_real_app = button.process_id > 0 && button.process_id != explorer_pid as i32;
@@ -281,15 +281,15 @@ fn match_windows_for_button(button: &TaskbarButton, all_windows: &[WindowInfo]) 
                     if w.title.is_empty() {
                         return false;
                     }
-                    if let Some(ref window_aumid) = w.app_user_model_id {
-                        let window_aumid_lower = window_aumid.to_lowercase();
-                        // Exact match hoặc button automation_id là prefix của window AppUserModelID
-                        window_aumid_lower == auto_id_lower
-                            || window_aumid_lower.starts_with(&auto_id_lower)
-                            || auto_id_lower.contains(&window_aumid_lower)
-                    } else {
-                        false
-                    }
+                    let window_aumid = match get_app_user_model_id(w.hwnd) {
+                        Some(aumid) => aumid,
+                        None => return false, // filter closure return
+                    };
+
+                    let window_aumid_lower = window_aumid.to_lowercase();
+                    window_aumid_lower == auto_id_lower
+                        || window_aumid_lower.starts_with(&auto_id_lower)
+                        || auto_id_lower.contains(&window_aumid_lower)
                 })
                 .cloned()
                 .collect();

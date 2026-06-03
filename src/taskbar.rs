@@ -49,22 +49,41 @@
 //! buttons.sort_by_key(|b| b.rect.left);
 //! ```
 
+use std::cell::RefCell;
+use std::time::Instant;
 use tracing::{debug, instrument};
 use windows::core::w;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER,
+    CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, CLSCTX_LOCAL_SERVER,
     COINIT_APARTMENTTHREADED,
 };
+use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::{
-    CUIAutomation, IUIAutomation, IUIAutomationCondition, IUIAutomationElementArray,
-    TreeScope_Descendants,
+    AutomationElementMode_None, CUIAutomation, IUIAutomation, IUIAutomationCacheRequest,
+    IUIAutomationCondition, IUIAutomationElementArray, TreeScope_Descendants,
+    UIA_AutomationIdPropertyId, UIA_BoundingRectanglePropertyId, UIA_ClassNamePropertyId,
+    UIA_NamePropertyId, UIA_ProcessIdPropertyId,
 };
-use windows::Win32::UI::WindowsAndMessaging::{FindWindowExW, FindWindowW};
+use windows::Win32::UI::Shell::IVirtualDesktopManager;
+use windows::Win32::UI::Shell::VirtualDesktopManager;
+use windows::Win32::UI::WindowsAndMessaging::{FindWindowExW, FindWindowW, GetForegroundWindow};
 
 use crate::switcher::{
     find_visible_windows, find_window_for_button, find_windows_for_button, WindowInfo,
 };
+
+/// Cache TTL: 1 giây. Nếu không có WinEvent invalidate, cache tự expire sau 2s.
+///
+/// Đây là safety net, trường hợp hiếm khi WinEvent bị miss.
+/// Bình thường, cache bị invalidate ngay khi nhận event từ taskbar.
+const CACHE_TTL_SECS: f64 = 1.0;
+
+/// Button cache với timestamp.
+struct ButtonCache {
+    buttons: Vec<TaskbarButton>,
+    created_at: Instant,
+}
 
 /// Hướng cycle: trái hoặc phải trên taskbar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,8 +91,6 @@ pub enum CycleDirection {
     Forward,  // Alt+] — sang phải
     Backward, // Alt+[ — sang trái
 }
-
-const TASKBAR_BUTTON_CLASS: &str = "Taskbar.TaskListButtonAutomationPeer";
 
 /// Taskbar button trên Windows 11. Chứa thông tin để xác định vị trí và thứ tự của nút trên
 /// taskbar.
@@ -127,9 +144,20 @@ pub struct CycleEntry {
 /// Result của việc enumerate taskbar buttons.
 pub struct TaskbarEnumerator {
     /// COM interface IUIAutomation, "máy quét" UI.
-    ///
-    /// Không implements `Send`/`Sync` vì COM objects không an toàn khi share cross-thread.
     automation: IUIAutomation,
+
+    /// Cache button list để tránh re-enumerate mỗi lần bấm phím.
+    ///
+    /// `RefCell` cho phép mutate từ `&self` methods (không cần `&mut self`).
+    /// Cache bị invalidate bởi UIA event hoặc khi TTL (1 giây) hết hạn.
+    button_cache: RefCell<Option<ButtonCache>>,
+
+    /// Virtual Desktop ID của foreground window gần nhất.
+    /// Dùng để phát hiện chuyển desktop — nếu ID thay đổi → invalidate cache.
+    last_desktop_id: RefCell<Option<windows::core::GUID>>,
+
+    /// HWND của taskbar window.
+    taskbar_hwnd: HWND,
 }
 
 impl TaskbarEnumerator {
@@ -158,35 +186,117 @@ impl TaskbarEnumerator {
             let automation: IUIAutomation =
                 CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)?;
 
+            let taskbar_hwnd = FindWindowW(w!("Shell_TrayWnd"), None)?;
+            if taskbar_hwnd.0.is_null() {
+                anyhow::bail!("Shell_TrayWnd not found, có thể đang chạy portable mode hoặc taskbar bị disabled")
+            }
+
             Ok(Self {
                 automation,
+                taskbar_hwnd,
+                button_cache: RefCell::new(None),
+                last_desktop_id: RefCell::new(None),
             })
         }
     }
 
     /// Liệt kê tất cả taskbar buttons trên **primary monitor** (taskbar chính).
     ///
-    /// # Luồng
-    ///
-    /// ```text
-    /// 1. Tìm Shell_TrayWnd (FindWindowW)
-    /// 2. Quét descendants từ root element (ElementFromHandle + FindAll)
-    /// 3. Nếu không thấy -> thử qua DesktopWindowContentBridge (Win11 fallback)
-    /// 4. Sort theo rect.left (trái -> phải)
-    /// ```
-    ///
-    /// # Tại sao phải thử 2 lần?
-    ///
-    /// Win11 có 2 cấu trúc taskbar:
-    /// 1. **DirectUI** (cũ): XAML buttons nằm trực tiếp trong Shell_TrayWnd tree
-    /// 2. **ContentBridge** (mới): XAML buttons nằm trong
-    /// `Windows.UI.Composition.DesktopWindowContentBridge`
-    ///
-    /// Code thử cả 2 path để đảm bảo tìm thấy buttons.
+    /// Sử dụng cache nếu còn hợp lệ (< CACHE_TTL và chưa bị invalidate,
+    /// và virtual desktop chưa thay đổi).
+    /// Nếu cache miss, enumerate mới và lưu vào cache.
     pub fn enumerate_primary_buttons(&self) -> anyhow::Result<Vec<TaskbarButton>> {
-        let taskbar_hwnd = self.find_primary_taskbar_hwnd()?;
+        // Kiểm tra virtual desktop switch trước khi dùng cache
+        if self.desktop_changed() {
+            self.invalidate_cache();
+        }
 
-        unsafe { self.enumerate_buttons_for_hwnd(taskbar_hwnd) }
+        if let Some(ref cache) = *self.button_cache.borrow() {
+            let age = cache.created_at.elapsed().as_secs_f64();
+            if age < CACHE_TTL_SECS {
+                debug!("Using cached buttons (age: {:.0}ms)", age * 1000.0);
+                return Ok(cache.buttons.clone());
+            }
+        }
+
+        unsafe {
+            let buttons = self.enumerate_buttons_for_hwnd()?;
+            *self.button_cache.borrow_mut() = Some(ButtonCache {
+                buttons: buttons.clone(),
+                created_at: Instant::now(),
+            });
+            Ok(buttons)
+        }
+    }
+
+    /// Kiểm tra virtual desktop có thay đổi không.
+    ///
+    /// So sánh [`IVirtualDesktopManager::GetWindowDesktopId`] của foreground window
+    /// với `last_desktop_id`. Nếu khác -> trả về `true` (cache cần invalidate).
+    ///
+    /// Lưu ý: chỉ trả về `true` 1 lần khi desktop thay đổi, sau đó cập nhật
+    /// `last_desktop_id` nên lần gọi sau sẽ trả về `false`.
+    fn desktop_changed(&self) -> bool {
+        let fg = unsafe { GetForegroundWindow() };
+        if fg.0.is_null() {
+            return false;
+        }
+
+        let mgr: IVirtualDesktopManager =
+            match unsafe { CoCreateInstance(&VirtualDesktopManager, None, CLSCTX_LOCAL_SERVER) } {
+                Ok(m) => m,
+                Err(_) => return false,
+            };
+
+        let current_id = match unsafe { mgr.GetWindowDesktopId(fg) } {
+            Ok(id) => id,
+            Err(_) => return false,
+        };
+
+        let mut last = self.last_desktop_id.borrow_mut();
+        let changed = match *last {
+            Some(ref prev) => prev != &current_id,
+            None => false,
+        };
+
+        *last = Some(current_id);
+        changed
+    }
+
+    /// Invalidate button cache — gọi khi nhận UIA StructureChanged event hoặc
+    /// WinEvent từ taskbar.
+    ///
+    /// UIA event (ChildAdded, ChildRemoved, ...) từ taskbar báo hiệu
+    /// rằng button list có thể đã thay đổi. Cache phải bị invalidate
+    /// để lần cycle tiếp theo re-enumerate.
+    pub fn invalidate_cache(&self) {
+        let mut cache = self.button_cache.borrow_mut();
+        if cache.is_some() {
+            debug!("Button cache invalidated (event)");
+            *cache = None;
+        }
+    }
+
+    /// Install UIA StructureChanged event handler trên taskbar.
+    ///
+    /// Gọi 1 lần sau khi tạo TaskbarEnumerator.
+    pub fn install_uia_handler(&self, main_thread_id: u32) -> anyhow::Result<()> {
+        unsafe {
+            crate::uia_events::install_uia_handler(
+                &self.automation,
+                self.taskbar_hwnd,
+                main_thread_id,
+            )
+        }
+    }
+
+    /// Uninstall UIA event handler.
+    ///
+    /// Gọi khi app exit.
+    pub fn uninstall_uia_handler(&self) {
+        unsafe {
+            crate::uia_events::uninstall_uia_handler(&self.automation, self.taskbar_hwnd);
+        }
     }
 
     /// Tìm button kế tiếp (trái/phải) của foreground window và trả về window cần activate.
@@ -262,78 +372,102 @@ impl TaskbarEnumerator {
         }
     }
 
+    /// Tạo CacheRequest chứa các properties cần thiết cho taskbar buttons.
+    ///
+    /// Thay vì đọc từng property riêng lẻ (4 COM cross-process calls/button),
+    /// CacheRequest batch tất cả vào 1 lần duyệt — UIA lấy properties
+    /// cùng lúc với tree traversal.
+    unsafe fn create_button_cache_request(&self) -> anyhow::Result<IUIAutomationCacheRequest> {
+        let cache = self.automation.CreateCacheRequest()?;
+
+        cache.AddProperty(UIA_NamePropertyId)?;
+        cache.AddProperty(UIA_BoundingRectanglePropertyId)?;
+        cache.AddProperty(UIA_ProcessIdPropertyId)?;
+        cache.AddProperty(UIA_AutomationIdPropertyId)?;
+
+        cache.SetAutomationElementMode(AutomationElementMode_None)?;
+
+        Ok(cache)
+    }
+
     /// Core enumeration logic — tìm tất cả TaskListButtonAutomationPeer.
     ///
-    /// # Chi tiết từng bước
-    ///
-    /// ```rust,ignore
-    /// // Tạo condition "lấy tất cả" (không lọc gì)
-    /// let true_condition = automation.CreateTrueCondition()?;
-    ///
-    /// // Lấy element gốc của taskbar (Shell_TrayWnd)
-    /// let root = automation.ElementFromHandle(taskbar_hwnd)?;
-    ///
-    /// // FindAll với TreeScope_Descendants = tìm TẤT CẢ con cháu
-    /// let items = root.FindAll(TreeScope_Descendants, &true_condition)?;
-    ///
-    /// // Duyệt từng element, lọc class_name == TASKBAR_BUTTON_CLASS
-    /// for i in 0..count {
-    ///     let item = items.GetElement(i)?;
-    ///     if item.CurrentClassName() == "Taskbar.TaskListButtonAutomationPeer" {
-    ///         buttons.push(extract_info(item));
-    ///     }
-    /// }
-    ///
-    /// // Sort theo vị trí trái → phải (thứ tự taskbar)
-    /// buttons.sort_by_key(|b| b.rect.left);
-    /// ```
-    unsafe fn enumerate_buttons_for_hwnd(
-        &self,
-        root_hwnd: HWND,
-    ) -> anyhow::Result<Vec<TaskbarButton>> {
-        let true_condition = self.automation.CreateTrueCondition()?;
-        let mut all_buttons = Vec::new();
-        let root_element = self.automation.ElementFromHandle(root_hwnd)?;
-        let items = root_element.FindAll(TreeScope_Descendants, &true_condition)?;
+    /// Dùng `FindAllBuildCache` thay vì `FindAll` để batch property reads.
+    /// Thay vì 4 COM calls/button (CurrentName, CurrentBoundingRectangle, ...),
+    /// UIA lấy tất cả properties trong 1 lần tree traversal.
+    #[instrument(level = "debug", skip_all)]
+    unsafe fn enumerate_buttons_for_hwnd(&self) -> anyhow::Result<Vec<TaskbarButton>> {
+        let taskbar_hwnd = self.taskbar_hwnd;
+        let t0 = Instant::now();
 
+        let class_condition = self.automation.CreatePropertyCondition(
+            UIA_ClassNamePropertyId,
+            &VARIANT::from("Taskbar.TaskListButtonAutomationPeer"),
+        )?;
+        debug!(
+            "CreatePropertyCondition: {:.2}ms",
+            t0.elapsed().as_secs_f64() * 1000.0
+        );
+
+        let t1 = Instant::now();
+        let cache_request = self.create_button_cache_request()?;
+        debug!(
+            "CreateCacheRequest: {:.2}ms",
+            t1.elapsed().as_secs_f64() * 1000.0
+        );
+
+        let t2 = Instant::now();
+        let root_element = self.automation.ElementFromHandle(taskbar_hwnd)?;
+        debug!(
+            "ElementFromHandle: {:.2}ms",
+            t2.elapsed().as_secs_f64() * 1000.0
+        );
+
+        let t3 = Instant::now();
+        let items = root_element.FindAllBuildCache(
+            TreeScope_Descendants,
+            &class_condition,
+            &cache_request,
+        )?;
+        debug!(
+            "FindAllBuildCache: {:.2}ms",
+            t3.elapsed().as_secs_f64() * 1000.0
+        );
+
+        let t4 = Instant::now();
+        let mut all_buttons = Vec::new();
         self.collect_buttons(&items, &mut all_buttons)?;
+        debug!(
+            "collect_buttons ({} items): {:.2}ms",
+            all_buttons.len(),
+            t4.elapsed().as_secs_f64() * 1000.0
+        );
 
         if all_buttons.is_empty() {
-            self.enumerate_via_bridge_windows(root_hwnd, &true_condition, &mut all_buttons)?;
+            self.enumerate_via_bridge_windows(
+                taskbar_hwnd,
+                &class_condition,
+                &cache_request,
+                &mut all_buttons,
+            )?;
         }
 
-        // Sort theo vị trí trái -> phải
-        //
-        // rect.left = tọa độ x của cạnh trái button
-        // Taskbar có thể ở trên/dưới/trái/phải màn hình,
-        // nhưng với taskbar ngang, left tăng dần từ trái → phải.
         all_buttons.sort_by_key(|b| b.rect.left);
+
+        debug!(
+            "enumerate_buttons_for_hwnd TOTAL: {:.2}ms",
+            t0.elapsed().as_secs_f64() * 1000.0
+        );
 
         Ok(all_buttons)
     }
 
-    /// Lọc và trích xuất thông tin từ UIA element array.
+    /// Trích xuất thông tin từ UIA element array.
     ///
-    /// # Tại sao phải lọc?
-    ///
-    /// `FindAll(TreeScope_Descendants)` trả về **MỌI** element con của taskbar:
-    /// - TaskListButtonAutomationPeer (các nút app)
-    /// - StartButton
-    /// - SearchButton
-    /// - ClockButton
-    /// - NotificationIcon
-    /// - v.v.
-    ///
-    /// Ta chỉ quan tâm `Taskbar.TaskListButtonAutomationPeer`.
-    ///
-    /// # Mỗi button cung cấp gì?
-    ///
-    /// | Property | Ý nghĩa | Ví dụ |
-    /// |----------|---------|---------|
-    /// | `CurrentClassName` | Loại element | `"Taskbar.TaskListButtonAutomationPeer"` |
-    /// | `CurrentName` | Tên hiển thị | `"Chrome - 3 running windows"` |
-    /// | `CurrentBoundingRectangle` | Vị trí | `RECT { left: 100, top: 1060, ... }` |
-    /// | `CurrentProcessId` | PID | `1234` (thường là explorer.exe) |
+    /// Vì dùng `CreatePropertyCondition(UIA_ClassNamePropertyId)`,
+    /// `FindAllBuildCache` chỉ trả về `Taskbar.TaskListButtonAutomationPeer` elements.
+    /// Properties đã được cached sẵn — đọc qua `Cached*` methods, không cần COM call riêng.
+    #[instrument(level = "debug", skip_all)]
     unsafe fn collect_buttons(
         &self,
         items: &IUIAutomationElementArray,
@@ -341,47 +475,32 @@ impl TaskbarEnumerator {
     ) -> anyhow::Result<()> {
         let count = items.Length()?;
 
+        debug!("collect_buttons: count={}", count);
+
         for i in 0..count {
             let item = items.GetElement(i)?;
 
-            // CurrentClassName: lọc chỉ lấy button
-            //
-            // Taskbar.TaskListButtonAutomationPeer = nút app trên taskbar Win11
-            // StartButton = nút Start
-            // SearchButton = nút Search
-            // ClockButton = đồng hồ
-            let class_name = item
-                .CurrentClassName()
+            let name = item
+                .CachedName()
                 .ok()
                 .map(|b| b.to_string())
                 .unwrap_or_default();
 
-            if class_name == TASKBAR_BUTTON_CLASS {
-                let name = item
-                    .CurrentName()
-                    .ok()
-                    .map(|b| b.to_string())
-                    .unwrap_or_default();
+            let rect = match item.CachedBoundingRectangle() {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
 
-                // Lấy vị trí (để sắp xếp thứ tự)
-                let rect = match item.CurrentBoundingRectangle() {
-                    Ok(r) => r,
-                    Err(_) => continue, // Button không có rect hợp lệ -> bỏ qua
-                };
+            let process_id = item.CachedProcessId().unwrap_or(0);
 
-                // Lấy PID (để match với window thực, trường hợp này không mấy khả thi)
-                let process_id = item.CurrentProcessId().unwrap_or(0);
+            let automation_id = item.CachedAutomationId().ok().map(|s| s.to_string());
 
-                // Lấy AutomationID (có thể chứa AppUserModelID hoặc dùng để match)
-                let automation_id = item.CurrentAutomationId().ok().map(|s| s.to_string());
-
-                buttons.push(TaskbarButton {
-                    name,
-                    rect,
-                    process_id,
-                    automation_id,
-                });
-            }
+            buttons.push(TaskbarButton {
+                name,
+                rect,
+                process_id,
+                automation_id,
+            });
         }
 
         Ok(())
@@ -397,32 +516,24 @@ impl TaskbarEnumerator {
     /// ```text
     /// 1. FindWindowEx tìm child window có class "Windows.UI.Composition.DesktopWindowContentBridge"
     /// 2. Gọi ElementFromHandle trên bridge window đó
-    /// 3. FindAll từ bridge element
-    /// 4. collect_buttons lọc TaskListButtonAutomationPeer
+    /// 3. FindAllBuildCache từ bridge element (với CacheRequest)
+    /// 4. collect_buttons đọc cached properties
     /// ```
     ///
     /// # Tại sao cần vòng lặp?
     ///
     /// Có thể có NHIỀU bridge windows (một số ẩn hoặc không chứa buttons).
     /// Code duyệt đến khi tìm thấy buttons HOẶC hết child windows.
+    #[instrument(level = "debug", skip_all)]
     unsafe fn enumerate_via_bridge_windows(
         &self,
         root_hwnd: HWND,
         condition: &IUIAutomationCondition,
+        cache_request: &IUIAutomationCacheRequest,
         buttons: &mut Vec<TaskbarButton>,
     ) -> anyhow::Result<()> {
-        // HWND::default() = null pointer
         let mut child_hwnd = HWND::default();
 
-        // FindWindowEx: tìm child window của root_hwnd
-        //
-        // FindWindowExW(parent, child_after, class_name, window_name)
-        // - parent = Shell_TrayWnd
-        // - child_after = null (tìm từ đầu)
-        // - class_name = "Windows.UI.Composition.DesktopWindowContentBridge"
-        // - window_name = null (bất kỳ)
-        //
-        // Vòng lặp để tìm TẤT CẢ child windows cùng class
         loop {
             child_hwnd = FindWindowExW(
                 Some(root_hwnd),
@@ -432,57 +543,26 @@ impl TaskbarEnumerator {
             )
             .unwrap_or_default();
 
-            // .0.is_null() = kiểm tra HWND có null không
             if child_hwnd.0.is_null() {
-                break; // Hết windows
+                break;
             }
 
-            // Lấy UIA element từ bridge HWND
             if let Ok(bridge_element) = self.automation.ElementFromHandle(child_hwnd) {
-                // Tìm descendants (các nút bên trong bridge)
-                if let Ok(items) = bridge_element.FindAll(TreeScope_Descendants, condition) {
+                if let Ok(items) = bridge_element.FindAllBuildCache(
+                    TreeScope_Descendants,
+                    condition,
+                    cache_request,
+                ) {
                     self.collect_buttons(&items, buttons)?;
                 }
             }
 
-            // Nếu đã tìm thấy buttons → dừng
-            // Tránh duyệt thêm các bridge không cần thiết
             if !buttons.is_empty() {
                 break;
             }
         }
 
         Ok(())
-    }
-
-    /// Tìm HWND của primary taskbar (`Shell_TrayWnd`).
-    ///
-    /// # Shell_TrayWnd là gì?
-    ///
-    /// `Shell_TrayWnd` (Shell Tray Window) là **top-level window** của taskbar.
-    /// Đây là window class tiêu chuẩn của Windows từ Windows 95 đến Win11.
-    ///
-    /// Các class windows liên quan:
-    /// - `Shell_TrayWnd` — taskbar chính
-    /// - `Shell_SecondaryTrayWnd` — taskbar trên monitor phụ
-    /// - `ReBarWindow32` — container chứa taskbar items (Win10)
-    /// - `MSTaskSwWClass` — taskbar switcher (Win10)
-    /// - `MSTaskListWClass` — danh sách nhiệm vụ (Win10)
-    ///
-    /// # Win11 thay đổi gì?
-    ///
-    /// Win11 ẩn `ReBarWindow32` và dùng XAML-based taskbar.
-    /// Nhưng `Shell_TrayWnd` vẫn tồn tại (legacy compatibility).
-    fn find_primary_taskbar_hwnd(&self) -> anyhow::Result<HWND> {
-        unsafe {
-            let hwnd = FindWindowW(w!("Shell_TrayWnd"), None).unwrap_or_default();
-
-            if hwnd.0.is_null() {
-                anyhow::bail!("Shell_TrayWnd not found — có thể đang chạy portable mode hoặc taskbar bị disabled");
-            }
-
-            Ok(hwnd)
-        }
     }
 
     /// Tìm index của taskbar button tương ứng với foreground window.
@@ -502,6 +582,30 @@ impl TaskbarEnumerator {
         let fg_info = all_windows.iter().find(|w| w.hwnd == foreground_hwnd);
         let fg_name = fg_info.map(|w| w.title.as_str()).unwrap_or("<unknown>");
 
+        // Fast path: match foreground AUMID với button automation_id
+        // Tránh duyệt tất cả windows cho mỗi button — chỉ 1 COM call
+        if let Some(fg_aumid) = crate::switcher::get_app_user_model_id(foreground_hwnd) {
+            let fg_aumid_lower = fg_aumid.to_lowercase();
+            for (i, button) in buttons.iter().enumerate() {
+                if let Some(auto_id) = &button.automation_id {
+                    if !auto_id.is_empty() {
+                        let auto_id_lower = auto_id.to_lowercase();
+                        if auto_id_lower == fg_aumid_lower
+                            || fg_aumid_lower.starts_with(&auto_id_lower)
+                            || auto_id_lower.contains(&fg_aumid_lower)
+                        {
+                            debug!(
+                                "Active button [{}]: '{}' fast-match AUMID '{}' vs fg AUMID '{}'",
+                                i, button.name, auto_id, fg_aumid
+                            );
+                            return Some(i);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Slow path: reverse matching qua find_windows_for_button
         for (i, button) in buttons.iter().enumerate() {
             let windows = find_windows_for_button(button, all_windows);
 
