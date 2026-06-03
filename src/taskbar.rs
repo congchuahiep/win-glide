@@ -51,7 +51,7 @@
 
 use std::cell::RefCell;
 use std::time::Instant;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 use windows::core::w;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{
@@ -69,9 +69,9 @@ use windows::Win32::UI::Shell::IVirtualDesktopManager;
 use windows::Win32::UI::Shell::VirtualDesktopManager;
 use windows::Win32::UI::WindowsAndMessaging::{FindWindowExW, FindWindowW, GetForegroundWindow};
 
-use crate::switcher::{
-    find_visible_windows, find_window_for_button, find_windows_for_button, WindowInfo,
-};
+use crate::switcher::{find_visible_windows, find_window_for_button, find_windows_for_button};
+use crate::types::{TaskbarButton, WindowInfo};
+use crate::utils::truncate;
 
 /// Cache TTL: 1 giây. Nếu không có WinEvent invalidate, cache tự expire sau 2s.
 ///
@@ -92,47 +92,11 @@ pub enum CycleDirection {
     Backward, // Alt+[ — sang trái
 }
 
-/// Taskbar button trên Windows 11. Chứa thông tin để xác định vị trí và thứ tự của nút trên
-/// taskbar.
-///
-/// **Không chứa HWND** vì Win11 XAML taskbar buttons không có HWND riêng
-#[derive(Debug, Clone)]
-pub struct TaskbarButton {
-    /// Tên hiển thị của nút.
-    ///
-    /// Format trên Win11:
-    /// - App đơn: `"Chrome"`
-    /// - App có nhiều window: `"Chrome - 3 running windows"`
-    /// - App đã pin: `"Notepad - Pinned"`
-    ///
-    /// Dùng [`clean_button_name()`] để strip suffix.
-    pub name: String,
-
-    /// Vị trí và kích thước trên màn hình (pixel).
-    ///
-    /// Dùng `rect.left` để sắp xếp các nút theo thứ tự trái -> phải.
-    pub rect: windows::Win32::Foundation::RECT,
-
-    /// Process ID của ứng dụng sở hữu nút này.
-    ///
-    /// ⚠️ **Quan trọng**: Trên Win11, giá trị này THƯỜNG trả về PID của `explorer.exe`,
-    /// không phải PID của ứng dụng thực. Lý do: XAML taskbar chạy trong explorer process.
-    ///
-    /// Do đó, ta KHÔNG thể dùng PID này trực tiếp để `SetForegroundWindow`.
-    /// Phải dùng [`super::switcher::find_window_for_button()`] để tìm HWND thực.
-    pub process_id: i32,
-
-    /// Automation ID của button từ UI Automation.
-    ///
-    /// Trên Win11, đây có thể chứa AppUserModelID, giúp matching windows chính xác hơn.
-    pub automation_id: Option<String>,
-}
-
 /// Một window target trong danh sách cycle.
 /// Mỗi entry tương ứng với 1 window cụ thể (HWND),
 /// không phải 1 taskbar button.
 #[derive(Debug, Clone)]
-pub struct CycleEntry {
+pub struct TargetWindow {
     /// Tên hiển thị (window title)
     pub name: String,
     /// HWND của window cần activate
@@ -277,39 +241,54 @@ impl TaskbarEnumerator {
         }
     }
 
-    /// Install UIA StructureChanged event handler trên taskbar.
-    ///
-    /// Gọi 1 lần sau khi tạo TaskbarEnumerator.
-    pub fn install_uia_handler(&self, main_thread_id: u32) -> anyhow::Result<()> {
-        unsafe {
-            crate::uia_events::install_uia_handler(
-                &self.automation,
-                self.taskbar_hwnd,
-                main_thread_id,
-            )
-        }
+    /// Expose `IUIAutomation` reference — dùng bởi UiaEventHook.
+    pub fn automation(&self) -> &IUIAutomation {
+        &self.automation
     }
 
-    /// Uninstall UIA event handler.
-    ///
-    /// Gọi khi app exit.
-    pub fn uninstall_uia_handler(&self) {
-        unsafe {
-            crate::uia_events::uninstall_uia_handler(&self.automation, self.taskbar_hwnd);
-        }
+    /// Expose taskbar HWND — dùng bởi UiaEventHook.
+    pub fn taskbar_hwnd(&self) -> HWND {
+        self.taskbar_hwnd
     }
 
-    /// Tìm button kế tiếp (trái/phải) của foreground window và trả về window cần activate.
+    /// Cycle đến window kế tiếp (dựa trên vị trí trái/phải của taskbar button đang được active) và
+    /// activate window.
     ///
-    /// # Khác với `build_cycle_entries`:
-    ///
-    /// - `build_cycle_entries`: xây **toàn bộ** danh sách (N buttons × M windows) → ~30ms
-    /// - `cycle_to_neighbor`: chỉ tìm button hiện tại + button kế bên + **1 window** → ~15ms
-    ///   (hoặc <1ms nếu buttons cache hợp lệ)
+    /// Là API public chính dùng từ App::handle_hotkey
+    #[instrument(level = "debug", skip_all)]
+    pub fn cycle_to_neighbor(
+        &self,
+        combine_enabled: bool,
+        direction: CycleDirection,
+    ) -> anyhow::Result<()> {
+        let foreground = unsafe { GetForegroundWindow() };
+        let target = self.find_neighbor_window(foreground, combine_enabled, direction)?;
+
+        match target {
+            Some(entry) => {
+                debug!(
+                    "Activating '{}' (grouped={})",
+                    truncate(&entry.name, 30),
+                    entry.is_grouped,
+                );
+
+                let ok = unsafe { crate::switcher::force_activate(entry.hwnd) };
+                if !ok {
+                    warn!("force_activate returned false");
+                }
+            }
+            None => warn!("No window found to cycle to"),
+        }
+
+        Ok(())
+    }
+
+    /// Tìm window được coi là nằm bên trái/phải của window `source` dựa trên vị trí của `source`
+    /// trên taskbar.
     ///
     /// # Tham số
     ///
-    /// * `foreground`: HWND của cửa sổ đang focus
+    /// * `source`: HWND của cửa sổ muốn tìm neighbor
     /// * `combine_enabled`: `true` = combine mode (button có thể nhóm); `false` = uncombined
     /// * `direction`: `Forward` (phải) hoặc `Backward` (trái)
     ///
@@ -317,12 +296,12 @@ impl TaskbarEnumerator {
     ///
     /// `None` nếu không tìm thấy window phù hợp. `Some(CycleEntry)` nếu tìm thấy.
     #[instrument(level = "debug", skip_all)]
-    pub fn cycle_to_neighbor(
+    pub fn find_neighbor_window(
         &self,
-        foreground: HWND,
+        source: HWND,
         combine_enabled: bool,
         direction: CycleDirection,
-    ) -> anyhow::Result<Option<CycleEntry>> {
+    ) -> anyhow::Result<Option<TargetWindow>> {
         let buttons = self.enumerate_primary_buttons()?;
 
         if buttons.is_empty() {
@@ -332,7 +311,7 @@ impl TaskbarEnumerator {
         let all_windows = find_visible_windows();
 
         let active_index =
-            TaskbarEnumerator::find_active_button_index(&buttons, foreground, &all_windows)
+            TaskbarEnumerator::find_active_button_index(&buttons, source, &all_windows)
                 .unwrap_or(0);
 
         debug!("Current index {active_index}");
@@ -356,14 +335,14 @@ impl TaskbarEnumerator {
 
             let is_grouped = windows.len() > 1;
 
-            Ok(windows.into_iter().next().map(|w| CycleEntry {
+            Ok(windows.into_iter().next().map(|w| TargetWindow {
                 name: w.title,
                 hwnd: w.hwnd,
                 is_grouped,
             }))
         } else {
             Ok(
-                find_window_for_button(&target_button, &all_windows).map(|w| CycleEntry {
+                find_window_for_button(&target_button, &all_windows).map(|w| TargetWindow {
                     name: w.title,
                     hwnd: w.hwnd,
                     is_grouped: false,
@@ -372,11 +351,10 @@ impl TaskbarEnumerator {
         }
     }
 
-    /// Tạo CacheRequest chứa các properties cần thiết cho taskbar buttons.
+    /// Tạo CacheRequest chứa các properties cần thiết cho taskbar buttons
     ///
-    /// Thay vì đọc từng property riêng lẻ (4 COM cross-process calls/button),
-    /// CacheRequest batch tất cả vào 1 lần duyệt — UIA lấy properties
-    /// cùng lúc với tree traversal.
+    /// Thay vì đọc từng property riêng lẻ (4 COM cross-process calls/button), CacheRequest batch
+    /// tất cả vào 1 lần duyệt, UIA lấy properties cùng lúc với tree traversal
     unsafe fn create_button_cache_request(&self) -> anyhow::Result<IUIAutomationCacheRequest> {
         let cache = self.automation.CreateCacheRequest()?;
 
@@ -390,58 +368,30 @@ impl TaskbarEnumerator {
         Ok(cache)
     }
 
-    /// Core enumeration logic — tìm tất cả TaskListButtonAutomationPeer.
+    /// Core enumeration logic, tìm tất cả TaskListButtonAutomationPeer
     ///
-    /// Dùng `FindAllBuildCache` thay vì `FindAll` để batch property reads.
-    /// Thay vì 4 COM calls/button (CurrentName, CurrentBoundingRectangle, ...),
-    /// UIA lấy tất cả properties trong 1 lần tree traversal.
+    /// Dùng `FindAllBuildCache` thay vì `FindAll` để batch property reads. Thay vì 4 COM calls
+    /// button (CurrentName, CurrentBoundingRectangle, ...), UIA lấy tất cả properties trong 1 lần
+    /// tree traversal
     #[instrument(level = "debug", skip_all)]
     unsafe fn enumerate_buttons_for_hwnd(&self) -> anyhow::Result<Vec<TaskbarButton>> {
         let taskbar_hwnd = self.taskbar_hwnd;
-        let t0 = Instant::now();
-
         let class_condition = self.automation.CreatePropertyCondition(
             UIA_ClassNamePropertyId,
             &VARIANT::from("Taskbar.TaskListButtonAutomationPeer"),
         )?;
-        debug!(
-            "CreatePropertyCondition: {:.2}ms",
-            t0.elapsed().as_secs_f64() * 1000.0
-        );
 
-        let t1 = Instant::now();
         let cache_request = self.create_button_cache_request()?;
-        debug!(
-            "CreateCacheRequest: {:.2}ms",
-            t1.elapsed().as_secs_f64() * 1000.0
-        );
 
-        let t2 = Instant::now();
         let root_element = self.automation.ElementFromHandle(taskbar_hwnd)?;
-        debug!(
-            "ElementFromHandle: {:.2}ms",
-            t2.elapsed().as_secs_f64() * 1000.0
-        );
-
-        let t3 = Instant::now();
         let items = root_element.FindAllBuildCache(
             TreeScope_Descendants,
             &class_condition,
             &cache_request,
         )?;
-        debug!(
-            "FindAllBuildCache: {:.2}ms",
-            t3.elapsed().as_secs_f64() * 1000.0
-        );
 
-        let t4 = Instant::now();
         let mut all_buttons = Vec::new();
         self.collect_buttons(&items, &mut all_buttons)?;
-        debug!(
-            "collect_buttons ({} items): {:.2}ms",
-            all_buttons.len(),
-            t4.elapsed().as_secs_f64() * 1000.0
-        );
 
         if all_buttons.is_empty() {
             self.enumerate_via_bridge_windows(
@@ -453,12 +403,6 @@ impl TaskbarEnumerator {
         }
 
         all_buttons.sort_by_key(|b| b.rect.left);
-
-        debug!(
-            "enumerate_buttons_for_hwnd TOTAL: {:.2}ms",
-            t0.elapsed().as_secs_f64() * 1000.0
-        );
-
         Ok(all_buttons)
     }
 
@@ -624,55 +568,6 @@ impl TaskbarEnumerator {
         );
         None
     }
-}
-
-/// Strip suffix " - N running window(s)" từ taskbar button name.
-///
-/// Win11 taskbar button name format:
-///
-/// | Loại | Format | After clean |
-/// |------|--------|------------|
-/// | App đơn | `"Notepad"` | `"Notepad"` |
-/// | Nhiều windows | `"Chrome - 3 running windows"` | `"Chrome"` |
-/// | Pinned | `"Notepad - Pinned"` | `"Notepad - Pinned"` |
-/// | VS Code split | `"VS Code - main.rs - 1 running window"` | `"VS Code - main.rs"` |
-///
-/// # Algorithm
-///
-/// 1. Tìm `" running window"` từ cuối chuỗi
-/// 2. Lấy phần trước đó
-/// 3. Tìm `" - "` hoặc `" — "` (em dash) làm delimiter cuối
-/// 4. Trả về phần trước delimiter
-///
-/// # Ví dụ
-///
-/// ```rust
-/// assert_eq!(clean_button_name("Chrome - 3 running windows"), "Chrome");
-/// assert_eq!(clean_button_name("VS Code - main.rs - 1 running window"), "VS Code - main.rs");
-/// assert_eq!(clean_button_name("Notepad"), "Notepad"); // không đổi
-/// ```
-pub fn clean_button_name(name: &str) -> String {
-    // rfind: tìm từ cuối về đầu
-    if let Some(pos) = name.rfind(" running window") {
-        // Lấy phần trước " running window"
-        let before = &name[..pos];
-
-        // Thử dash thường: " - "
-        if let Some(dash_pos) = before.rfind(" - ") {
-            return before[..dash_pos].to_string();
-        }
-
-        // Thử em dash: " — " (Unicode U+2014)
-        if let Some(dash_pos) = before.rfind(" \u{2014} ") {
-            return before[..dash_pos].to_string();
-        }
-
-        // Không có dash → trả về toàn bộ phần trước
-        return before.to_string();
-    }
-
-    // Không có suffix → trả về nguyên name
-    name.to_string()
 }
 
 // /// Destructor — giải phóng COM khi TaskbarEnumerator bị drop.

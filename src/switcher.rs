@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Instant;
 use tracing::{debug, error, instrument};
 use windows::core::{BOOL, BSTR};
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT, TRUE};
@@ -16,13 +17,16 @@ use windows::Win32::UI::WindowsAndMessaging::{
     ShowWindow, ASFW_ANY, SW_RESTORE,
 };
 
-use crate::taskbar::TaskbarButton;
+use crate::types::{TaskbarButton, WindowInfo};
+
+struct EnumData {
+    windows: Vec<WindowInfo>,
+}
 
 /// Mở cửa sổ và đưa nó lên đầu danh sách cửa sổ (foreground)
 #[instrument(level = "debug", skip_all)]
 pub unsafe fn force_activate(target: HWND) -> bool {
     let foreground = GetForegroundWindow();
-
     if foreground == target {
         return true;
     }
@@ -68,20 +72,6 @@ pub unsafe fn force_activate(target: HWND) -> bool {
     }
 
     GetForegroundWindow() == target
-}
-
-#[derive(Debug, Clone)]
-pub struct WindowInfo {
-    pub hwnd: HWND,
-    pub title: String,
-    pub process_id: u32,
-    pub rect: RECT,
-    pub process_name: String,
-    pub app_user_model_id: Option<String>,
-}
-
-struct EnumData {
-    windows: Vec<WindowInfo>,
 }
 
 fn get_process_name(pid: u32) -> String {
@@ -169,6 +159,7 @@ pub fn get_app_user_model_id(hwnd: HWND) -> Option<String> {
     }
 }
 
+/// Finds "all" visible windows on the system and returns their information.
 #[instrument(level = "debug", skip_all)]
 pub fn find_visible_windows() -> Vec<WindowInfo> {
     let mut data = EnumData {
@@ -315,7 +306,7 @@ fn match_windows_for_button(button: &TaskbarButton, all_windows: &[WindowInfo]) 
     }
 
     // Thử 3: Match theo title (fuzzy)
-    let clean_name = crate::taskbar::clean_button_name(&button.name);
+    let clean_name = crate::utils::clean_button_name(&button.name);
 
     if clean_name.is_empty() {
         error!("Cannot find windows cause there no clue left: !PID, !AppUserModelID, !clean_name");
@@ -328,7 +319,7 @@ fn match_windows_for_button(button: &TaskbarButton, all_windows: &[WindowInfo]) 
             if w.title.is_empty() {
                 return false;
             }
-            let w_clean = crate::taskbar::clean_button_name(&w.title);
+            let w_clean = crate::utils::clean_button_name(&w.title);
             !w_clean.is_empty() && (w_clean.contains(&clean_name) || clean_name.contains(&w_clean))
         })
         .cloned()
