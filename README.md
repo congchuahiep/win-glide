@@ -3,9 +3,9 @@
 Ứng dụng Rust thuần cho **Windows 11** giúp chuyển đổi qua lại giữa các nút taskbar theo thứ tự trên thanh taskbar (khác với Alt+Tab dùng để chuyển cửa sổ mở gần nhất).
 
 ```
-Alt + [    →  Chuyển sang nút taskbar bên trái
-Alt + ]    →  Chuyển sang nút taskbar bên phải
-Ctrl + C   →  Thoát
+Alt + [    ->  Chuyển sang nút taskbar bên trái
+Alt + ]    ->  Chuyển sang nút taskbar bên phải
+Ctrl + C   ->  Thoát
 ```
 
 > Windows 11 mặc định **không có phím tắt** để cycle qua các nút trên taskbar. Ứng dụng này mang lại trải nghiệm giống như **Mouse Wheel on Taskbar** trên Windhawk, nhưng là phiên bản standalone không cần DLL injection.
@@ -50,7 +50,7 @@ src/
          ↓
 5. ButtonWindowMap → tìm window ứng với target button (AUMID → PID → Title → Process)
          ↓
-6. force_activate(hwnd) → đưa target lên foreground
+6. force_activate(hwnd) -> đưa target lên foreground
 ```
 
 ## Công nghệ sử dụng
