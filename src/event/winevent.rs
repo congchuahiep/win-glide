@@ -1,9 +1,4 @@
-//! WinEvent hook — theo dõi EVENT_OBJECT_SHOW để uncombine cửa sổ mới.
-//!
-//! # Cache invalidation
-//!
-//! Cache invalidation đã chuyển sang UIA events (uia.rs).
-//! WinEvent không còn tham gia cache invalidation.
+//! WinEvent hook - theo dõi EVENT_OBJECT_SHOW để uncombine cửa sổ mới.
 
 use std::fmt::{self, Display};
 use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
@@ -12,12 +7,11 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetAncestor, GetClassNameW, GetWindowTextW, IsWindowVisible, PostThreadMessageW,
-    EVENT_OBJECT_SHOW, GA_ROOT, INDEXID_CONTAINER, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT,
-    WINEVENT_SKIPOWNPROCESS,
+    GetAncestor, GetClassNameW, IsWindowVisible, PostThreadMessageW, EVENT_OBJECT_SHOW, GA_ROOT,
+    INDEXID_CONTAINER, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 
-use crate::uncombine::UncombineManager;
+use crate::taskbar::UncombineManager;
 use crate::utils::is_system_class;
 
 pub const WM_APP_UNCOMBINE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 0x100;
@@ -25,7 +19,7 @@ pub const WM_APP_UNCOMBINE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_US
 static MAIN_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 static UNCOMBINE: AtomicPtr<UncombineManager> = AtomicPtr::new(std::ptr::null_mut());
 
-/// WinEvent hook RAII — install khi tạo, auto-uninstall khi Drop.
+/// WinEvent hook RAII - install khi tạo, auto-uninstall khi Drop.
 pub struct WinEventHook {
     hook_handle: HWINEVENTHOOK,
 }
@@ -68,7 +62,7 @@ impl Drop for WinEventHook {
     }
 }
 
-/// Callback WinEvent — chỉ xử lý EVENT_OBJECT_SHOW cho uncombine.
+/// Callback WinEvent - chỉ xử lý EVENT_OBJECT_SHOW cho uncombine.
 unsafe extern "system" fn win_event_proc(
     _hook: HWINEVENTHOOK,
     event: u32,

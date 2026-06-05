@@ -1,9 +1,4 @@
-//! UIA StructureChanged event handler — phát hiện thêm/xoá taskbar buttons.
-//!
-//! # Tại sao UIA thay vì WinEvent?
-//!
-//! UIA StructureChanged theo dõi trực tiếp cây UI của taskbar, phát hiện
-//! khi TaskListButtonAutomationPeer được thêm/xoá. Chính xác hơn WinEvent.
+//! UIA StructureChanged event handler, phát hiện thêm/xoá taskbar buttons.
 //!
 //! # Reorder detection
 //!
@@ -73,7 +68,7 @@ impl IUIAutomationStructureChangedEventHandler_Impl for StructureChangedHandler_
     }
 }
 
-/// UIA event hook RAII — install khi tạo, auto-uninstall khi Drop.
+/// UIA event hook RAII - install khi tạo, auto-uninstall khi Drop.
 ///
 /// Handler COM object được leak (Box::leak) để giữ alive suốt app lifetime.
 pub struct UiaEventHook {
@@ -95,8 +90,7 @@ impl UiaEventHook {
         MAIN_THREAD_ID.store(main_thread_id, Ordering::SeqCst);
 
         let taskbar_element = automation.ElementFromHandle(taskbar_hwnd)?;
-        let handler: IUIAutomationStructureChangedEventHandler =
-            StructureChangedHandler {}.into();
+        let handler: IUIAutomationStructureChangedEventHandler = StructureChangedHandler {}.into();
         let handler: &'static IUIAutomationStructureChangedEventHandler =
             Box::leak(Box::new(handler));
 

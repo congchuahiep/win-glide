@@ -21,7 +21,7 @@ Hãy tưởng tượng Windows là một **tòa nhà văn phòng**. Mỗi cửa 
 
 ### 2. Khái niệm nền tảng
 
-#### 2.1. HWND — Số nhà của mỗi cửa sổ
+#### 2.1. HWND - Số nhà của mỗi cửa sổ
 
 ```
 HWND = Handle to Window = "Số nhà"
@@ -30,7 +30,7 @@ HWND = Handle to Window = "Số nhà"
 Mỗi cửa sổ trên Windows có một **số nhà duy nhất** (HWND). Giống như mỗi phòng trong tòa nhà có số phòng riêng.
 
 ```rust
-HWND(ptr) // Ví dụ: 0x000A1234 — con trỏ 64-bit
+HWND(ptr) // Ví dụ: 0x000A1234 - con trỏ 64-bit
 ```
 
 - Desktop cũng là một HWND
@@ -61,7 +61,7 @@ graph TD
 - **Window** = một HWND, thuộc về 1 thread trong 1 process
 - **Quan trọng**: Taskbar chạy trong `explorer.exe`, KHÔNG phải trong app của bạn
 
-#### 2.3. Message Queue — Hộp thư của cửa sổ
+#### 2.3. Message Queue - Hộp thư của cửa sổ
 
 ```mermaid
 graph LR
@@ -76,9 +76,9 @@ graph LR
 
 Windows gửi **tin nhắn (message)** cho mỗi thread có cửa sổ. Mỗi tin nhắn có:
 
-- `msg.message` — loại tin nhắn (VD: `WM_HOTKEY`, `WM_PAINT`)
-- `msg.wParam` — tham số 1
-- `msg.lParam` — tham số 2
+- `msg.message` - loại tin nhắn (VD: `WM_HOTKEY`, `WM_PAINT`)
+- `msg.wParam` - tham số 1
+- `msg.lParam` - tham số 2
 
 Vòng lặp `GetMessageW()` giống như **kiểm tra hộp thư liên tục**:
 
@@ -93,9 +93,9 @@ while GetMessageW(&mut msg, None, 0, 0) {
 
 ---
 
-### 3. Luồng chi tiết — Từng bước một
+### 3. Luồng chi tiết - Từng bước một
 
-#### Bước 1: Đăng ký phím tắt — `RegisterHotKey`
+#### Bước 1: Đăng ký phím tắt - `RegisterHotKey`
 
 ```mermaid
 sequenceDiagram
@@ -119,7 +119,7 @@ sequenceDiagram
 
 **Tại sao dùng `None`?** Vì app của chúng ta không có cửa sổ chính. `RegisterHotKey(None, ...)` gửi `WM_HOTKEY` vào thread queue, đọc được bằng `GetMessageW`.
 
-#### Bước 2: Nhận phím tắt — `GetMessageW` loop
+#### Bước 2: Nhận phím tắt - `GetMessageW` loop
 
 ```rust
 // Khi bạn nhấn Alt+], Windows gửi:
@@ -131,10 +131,10 @@ sequenceDiagram
 graph LR
     K["🎹 Alt+] được nhấn"] --> OS["Windows OS<br>kiểm tra hotkey table"]
     OS -->|"WM_HOTKEY<br>wParam=2"| MQ["Message Queue"]
-    MQ -->|"GetMessageW()"| APP["cycle_taskbar(→)"]
+    MQ -->|"GetMessageW()"| APP["cycle_taskbar(->)"]
 ```
 
-#### Bước 3: Enum taskbar buttons — `IUIAutomation`
+#### Bước 3: Enum taskbar buttons - `IUIAutomation`
 
 Đây là phần phức tạp nhất. Hãy tưởng tượng:
 
@@ -149,7 +149,7 @@ graph TD
     end
 ```
 
-**IUIAutomation** là API **Accessibility** (trợ năng) của Windows. Giống như **màn hình đọc cho người khiếm thị** — nó mô tả mọi thứ trên màn hình theo cấu trúc cây.
+**IUIAutomation** là API **Accessibility** (trợ năng) của Windows. Giống như **màn hình đọc cho người khiếm thị** - nó mô tả mọi thứ trên màn hình theo cấu trúc cây.
 
 ```rust
 // 1. Tạo "máy quét" UIAutomation
@@ -158,7 +158,7 @@ let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, ...)?;
 // 2. Tìm cửa sổ taskbar
 let taskbar_hwnd = FindWindowW("Shell_TrayWnd", None)?;
 
-// 3. Quét taskbar → lấy element gốc
+// 3. Quét taskbar -> lấy element gốc
 let root = automation.ElementFromHandle(taskbar_hwnd)?;
 
 // 4. Tìm TẤT CẢ con cháu (TreeScope_Descendants)
@@ -178,7 +178,7 @@ for i in 0..count {
 
 **Tại sao dùng IUIAutomation thay vì tìm HWND trực tiếp?**
 
-Vì trên Win11, taskbar là **XAML app** (không phải Win32 truyền thống). Các nút không phải `HWND` riêng — chúng là **XAML elements** bên trong một `ContentBridge`. IUIAutomation có thể "thấy" chúng, còn `FindWindowEx` thì không.
+Vì trên Win11, taskbar là **XAML app** (không phải Win32 truyền thống). Các nút không phải `HWND` riêng - chúng là **XAML elements** bên trong một `ContentBridge`. IUIAutomation có thể "thấy" chúng, còn `FindWindowEx` thì không.
 
 **COM (Component Object Model)** là hệ thống "cắm phích" của Windows:
 
@@ -193,7 +193,7 @@ CoUninitialize();  // "Rút phích"
 
 ```rust
 all_buttons.sort_by_key(|b| b.rect.left);
-// Sắp xếp từ trái → phải theo vị trí trên màn hình
+// Sắp xếp từ trái -> phải theo vị trí trên màn hình
 ```
 
 Vì `CurrentBoundingRectangle()` cho ta `RECT { left, top, right, bottom }`, sort theo `left` cho đúng thứ tự taskbar.
@@ -221,16 +221,16 @@ for (i, button) in buttons.iter().enumerate() {
 **Vấn đề**: Win11 taskbar button trả về PID của `explorer.exe`, không phải app thực. Nên fallback sang **match theo tên**:
 
 ```rust
-// "TruyVanSQL - 1 running window" → strip suffix → "TruyVanSQL"
-// So với foreground window title "TruyVanSQL — main.rs"
+// "TruyVanSQL - 1 running window" -> strip suffix -> "TruyVanSQL"
+// So với foreground window title "TruyVanSQL - main.rs"
 ```
 
-#### Bước 6: Tìm HWND cửa sổ đích — `EnumWindows`
+#### Bước 6: Tìm HWND cửa sổ đích - `EnumWindows`
 
 ```mermaid
 graph TD
     EW["EnumWindows()<br>Đi qua TẤT CẢ cửa sổ"] --> W1["VS Code (PID 9012)<br>title='main.rs - ...'"]
-    EW --> W2["TruyVanSQL (PID 5678)<br>title='TruyVanSQL — main.rs'"]
+    EW --> W2["TruyVanSQL (PID 5678)<br>title='TruyVanSQL - main.rs'"]
     EW --> W3["Chrome (PID 3456)<br>title='Google - Chrome'"]
     EW --> W4["Desktop (PID 1234)<br>title='' (bỏ qua)"]
 
@@ -252,10 +252,10 @@ fn callback(hwnd, ...) -> BOOL {
 
 **Matching logic**:
 
-1. Nếu PID button ≠ explorer PID → tìm window có cùng PID
+1. Nếu PID button ≠ explorer PID -> tìm window có cùng PID
 2. Fallback: strip suffix `" - N running window"`, so khớp title
 
-#### Bước 7: Activate cửa sổ — `SetForegroundWindow`
+#### Bước 7: Activate cửa sổ - `SetForegroundWindow`
 
 Đây là phần khó nhất vì **Windows cấm process khác chiếm foreground** (chống malware quảng cáo pop-up).
 
@@ -282,7 +282,7 @@ sequenceDiagram
 
 ```rust
 unsafe fn force_activate(target: HWND) -> bool {
-    // Bước 1: Nếu minimize → restore
+    // Bước 1: Nếu minimize -> restore
     if IsIconic(target).as_bool() {
         ShowWindow(target, SW_RESTORE);
     }
@@ -295,14 +295,14 @@ unsafe fn force_activate(target: HWND) -> bool {
         return true;  // ✅ Thành công luôn!
     }
 
-    // Bước 4: Fallback — "mượn quyền" từ cửa sổ đang focus
+    // Bước 4: Fallback - "mượn quyền" từ cửa sổ đang focus
     let current_thread = GetCurrentThreadId();
     let fg_thread = GetWindowThreadProcessId(foreground, None);
 
     // Gắn input queue của ta vào queue của cửa sổ đang focus
     AttachThreadInput(current_thread, fg_thread, true);
 
-    SetForegroundWindow(target);   // Thử lại — giờ có quyền rồi!
+    SetForegroundWindow(target);   // Thử lại - giờ có quyền rồi!
     BringWindowToTop(target);      // Đảm bảo lên trên cùng
 
     // Trả lại quyền
@@ -310,11 +310,11 @@ unsafe fn force_activate(target: HWND) -> bool {
 }
 ```
 
-**`AttachThreadInput`** là "mượn áo" — gắn input queue (hàng đợi phím/chuột) của thread ta vào thread đang focus. Khi đó Windows nghĩ ta và cửa sổ focus là "cùng một người", nên cho phép ta gọi `SetForegroundWindow`.
+**`AttachThreadInput`** là "mượn áo" - gắn input queue (hàng đợi phím/chuột) của thread ta vào thread đang focus. Khi đó Windows nghĩ ta và cửa sổ focus là "cùng một người", nên cho phép ta gọi `SetForegroundWindow`.
 
 ---
 
-### 4. Sơ đồ tổng thể — Từ phím tắt đến cửa sổ activate
+### 4. Sơ đồ tổng thể - Từ phím tắt đến cửa sổ activate
 
 ```mermaid
 flowchart TD
@@ -324,15 +324,15 @@ flowchart TD
 
     D --> E["IUIAutomation<br>Quét Shell_TrayWnd"]
     E --> F["Lọc Taskbar.TaskListButtonAutomationPeer"]
-    F --> G["Sort theo rect.left<br>→ Danh sách nút theo thứ tự"]
+    F --> G["Sort theo rect.left<br>-> Danh sách nút theo thứ tự"]
 
     G --> H["GetForegroundWindow()<br>Lấy HWND đang focus"]
-    H --> I["So khớp PID/Title<br>→ Tìm nút đang active"]
+    H --> I["So khớp PID/Title<br>-> Tìm nút đang active"]
     I --> J["Tính target_index<br>(next hoặc prev)"]
 
-    J --> K["clean_button_name()<br>'TruyVanSQL - 1 running window'<br>→ 'TruyVanSQL'"]
+    J --> K["clean_button_name()<br>'TruyVanSQL - 1 running window'<br>-> 'TruyVanSQL'"]
     K --> L["EnumWindows()<br>Duyệt tất cả cửa sổ"]
-    L --> M["Match PID hoặc Title<br>→ Tìm HWND đích"]
+    L --> M["Match PID hoặc Title<br>-> Tìm HWND đích"]
 
     M --> N{"Tìm thấy HWND?"}
     N -->|Có| O["force_activate(hwnd)"]

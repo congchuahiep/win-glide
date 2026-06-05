@@ -1,7 +1,7 @@
-//! Kiểu dữ liệu dùng chung — chỉ chứa data structures thuần, không logic.
+//! Kiểu dữ liệu dùng chung - chỉ chứa data structures thuần, không logic.
 //!
 //! File này không import từ bất kỳ module nào khác trong project.
-//! Mọi module khác import từ đây → không có circular dependency.
+//! Mọi module khác import từ đây -> không có circular dependency.
 
 use windows::Win32::Foundation::{HWND, RECT};
 
@@ -40,4 +40,16 @@ pub struct WindowInfo {
 
     /// Tên file thực thi (VD: "chrome.exe")
     pub process_name: String,
+}
+
+/// Một window target trong danh sách cycle.
+/// Mỗi entry tương ứng với 1 window cụ thể (HWND), không phải 1 taskbar button.
+#[derive(Debug, Clone)]
+pub struct TargetWindow {
+    /// Tên hiển thị (window title)
+    pub name: String,
+    /// HWND của window cần activate
+    pub hwnd: HWND,
+    /// Có thuộc grouped button không
+    pub is_grouped: bool,
 }

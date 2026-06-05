@@ -1,6 +1,6 @@
 [package]
-name = "taskbar_switcher"
-version = "0.1.0"
+name = "better-windows-navigate"
+version = "0.0.1"
 edition = "2021"
 exclude = ["docs/"]
 
@@ -30,5 +30,5 @@ features = [
     "Win32_UI_Shell",
     "Win32_UI_Shell_PropertiesSystem",
     "Win32_Storage_EnhancedStorage",
+    "Win32_Graphics_Gdi",
 ]
-

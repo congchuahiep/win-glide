@@ -1,4 +1,4 @@
-//! Application state — điều phối tất cả components: enumerator, hotkey, event hooks.
+//! Application state - điều phối tất cả components: enumerator, hotkey, event hooks.
 //!
 //! `App` struct là lớp Model/Orchestrator. Khi thêm GUI:
 //! - `run()` thay message loop Win32 bằng GUI event loop
@@ -13,8 +13,7 @@ use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, WM_HOTKEY};
 
 use crate::event::{self, InvalidateSource};
 use crate::hotkey::{HotkeyAction, HotkeyManager};
-use crate::taskbar::{CycleDirection, TaskbarEnumerator};
-use crate::uncombine::UncombineManager;
+use crate::taskbar::{CycleDirection, TaskbarEnumerator, UncombineManager};
 
 pub struct App {
     enumerator: TaskbarEnumerator,
@@ -40,12 +39,12 @@ impl App {
         })
     }
 
-    /// Clone của running flag — dùng cho Ctrl+C handler.
+    /// Clone của running flag - dùng cho Ctrl+C handler.
     pub fn running(&self) -> Arc<AtomicBool> {
         self.running.clone()
     }
 
-    /// Main message loop — install hooks, xử lý event, cleanup.
+    /// Main message loop - install hooks, xử lý event, cleanup.
     ///
     /// # Safety
     ///
@@ -80,6 +79,7 @@ impl App {
             }
         }
 
+        // Cleanup app tại đây, huỷ đăng ký sự kiện, khôi phục trạng thái gốc của window,...
         // RAII: _win_hook tự Drop ở đây, uia_hook được drop bởi enumerator
         self.hotkey_manager.unregister_all();
         if !self.combine_enabled {
@@ -110,6 +110,24 @@ impl App {
                 }
             }
             None => {}
+        }
+
+        // Khi người dùng bấm giữ phím, Windows auto-repeat sẽ sinh ra hàng loạt sự kiện WM_HOTKEY
+        // trong lúc main thread đang bị block bởi lệnh cycle_to_neighbor.
+        //
+        // Dọn sạch hàng đợi (PeekMessage) loại bỏ các lệnh thừa này để tránh trượt cửa sổ khi
+        // thả tay.
+        unsafe {
+            let mut msg = std::mem::zeroed();
+            while windows::Win32::UI::WindowsAndMessaging::PeekMessageW(
+                &mut msg,
+                None,
+                WM_HOTKEY,
+                WM_HOTKEY,
+                windows::Win32::UI::WindowsAndMessaging::PM_REMOVE,
+            )
+            .as_bool()
+            {}
         }
     }
 

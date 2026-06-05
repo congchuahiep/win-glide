@@ -8,6 +8,7 @@
 ///
 /// assert_eq!(6, answer);
 /// ```
+#[allow(dead_code)]
 pub fn add_one(x: i32) -> i32 {
     x + 1
 }

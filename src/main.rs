@@ -2,11 +2,9 @@ mod app;
 mod event;
 mod hotkey;
 mod logging;
-mod switcher;
 mod taskbar;
 mod temp;
 mod types;
-mod uncombine;
 mod utils;
 
 use std::sync::atomic::{AtomicBool, Ordering};

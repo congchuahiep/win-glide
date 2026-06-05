@@ -9,10 +9,10 @@ pub fn truncate(s: &str, max_len: usize) -> String {
 /// Strip suffix " - N running window(s)" khỏi tên taskbar button.
 ///
 /// Format trên Win11:
-/// - App đơn: `"Notepad"` → `"Notepad"`
-/// - Nhiều windows: `"Chrome - 3 running windows"` → `"Chrome"`
-/// - Pinned: `"Notepad - Pinned"` → `"Notepad - Pinned"` (không đổi)
-/// - VS Code: `"VS Code - main.rs - 1 running window"` → `"VS Code - main.rs"`
+/// - App đơn: `"Notepad"` -> `"Notepad"`
+/// - Nhiều windows: `"Chrome - 3 running windows"` -> `"Chrome"`
+/// - Pinned: `"Notepad - Pinned"` -> `"Notepad - Pinned"` (không đổi)
+/// - VS Code: `"VS Code - main.rs - 1 running window"` -> `"VS Code - main.rs"`
 pub fn clean_button_name(name: &str) -> String {
     if let Some(pos) = name.rfind(" running window") {
         let before = &name[..pos];

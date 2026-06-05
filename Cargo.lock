@@ -18,6 +18,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "better-windows-navigate"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "ctrlc",
+ "nu-ansi-term",
+ "tracing",
+ "tracing-appender",
+ "tracing-forest",
+ "tracing-subscriber",
+ "windows",
+ "windows-core",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -271,21 +286,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "taskbar_switcher"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ctrlc",
- "nu-ansi-term",
- "tracing",
- "tracing-appender",
- "tracing-forest",
- "tracing-subscriber",
- "windows",
- "windows-core",
 ]
 
 [[package]]
