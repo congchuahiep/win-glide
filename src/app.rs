@@ -17,9 +17,9 @@ use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::logging::console::{self, CONSOLE_VISIBLE};
 use crate::event::{self, InvalidateSource};
 use crate::hotkey::{HotkeyAction, HotkeyManager};
+use crate::logging::console::{self, CONSOLE_VISIBLE};
 use crate::taskbar::{CycleDirection, TaskbarEnumerator, UncombineManager};
 use crate::tray_icon::{TrayIcon, IDM_COMBINE_MODE, IDM_EXIT, IDM_SHOW_CONSOLE};
 
@@ -375,6 +375,12 @@ impl App {
                 ) {
                     Ok(_) => { /* Thành công */ }
                     Err(e) => error!("Error cycling taskbar: {e}"),
+                }
+            }
+            Some(HotkeyAction::SwitchVirtualDesktop(index)) => {
+                let _guard = debug_span!("hotkey", action = "switch_virtual_desktop", index);
+                if let Err(e) = winvd::switch_desktop(index) {
+                    error!("Failed to switch virtual desktop {}: {:?}", index, e);
                 }
             }
             None => {}

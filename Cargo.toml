@@ -14,6 +14,7 @@ tracing-forest = { version = "0.3.1", features = ["smallvec", "ansi"] }
 windows-core = "0.61"
 windows-reactor = { git = "https://github.com/microsoft/windows-rs", branch = "master" }
 aquamarine = "0.6.0"
+winvd = "0.0.49"
 
 [dependencies.windows]
 version = "0.61"

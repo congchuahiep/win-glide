@@ -5,7 +5,6 @@ mod event;
 mod hotkey;
 mod logging;
 mod taskbar;
-mod temp;
 mod tray_icon;
 mod types;
 mod utils;

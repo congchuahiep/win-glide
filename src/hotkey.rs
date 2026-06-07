@@ -17,6 +17,8 @@ pub enum HotkeyAction {
     Left,
     /// Di chuyển tiêu điểm sang cửa sổ bên phải trên Taskbar.
     Right,
+    /// Chuyển đổi sang Virtual Desktop với index (0-based) chỉ định.
+    SwitchVirtualDesktop(u32),
 }
 
 /// Lưu trữ thông tin chi tiết và trạng thái của một phím nóng cụ thể.
@@ -60,6 +62,7 @@ impl HotkeyManager {
     /// Mặc định:
     /// - ID 1: `Alt+[` -> Di chuyển trái ([`HotkeyAction::Left`]).
     /// - ID 2: `Alt+]` -> Di chuyển phải ([`HotkeyAction::Right`]).
+    /// - ID 11-19: `Alt+1` -> `Alt+9` -> Chuyển VD tương ứng ([`HotkeyAction::SwitchVirtualDesktop`]).
     ///
     /// TODO: Cho phép người dùng tự điều chỉnh được phím tắt
     ///
@@ -67,22 +70,32 @@ impl HotkeyManager {
     /// Trả về lỗi nếu không thể đăng ký một hoặc nhiều phím nóng (thường do xung đột phím nóng với
     /// phần mềm khác).
     pub fn new() -> anyhow::Result<Self> {
-        let this = Self {
-            hotkeys: vec![
-                Hotkey {
-                    id: 1,
-                    action: HotkeyAction::Left,
-                    modifiers: MOD_ALT,
-                    vk: VK_OEM_4.0 as u32,
-                },
-                Hotkey {
-                    id: 2,
-                    action: HotkeyAction::Right,
-                    modifiers: MOD_ALT,
-                    vk: VK_OEM_6.0 as u32,
-                },
-            ],
-        };
+        let mut hotkeys = vec![
+            Hotkey {
+                id: 1,
+                action: HotkeyAction::Left,
+                modifiers: MOD_ALT,
+                vk: VK_OEM_4.0 as u32,
+            },
+            Hotkey {
+                id: 2,
+                action: HotkeyAction::Right,
+                modifiers: MOD_ALT,
+                vk: VK_OEM_6.0 as u32,
+            },
+        ];
+
+        // Đăng ký Alt + 1 đến Alt + 9 (Virtual Key 0x31 - 0x39)
+        for i in 1..=9 {
+            hotkeys.push(Hotkey {
+                id: 10 + i as i32,
+                action: HotkeyAction::SwitchVirtualDesktop(i as u32 - 1),
+                modifiers: MOD_ALT,
+                vk: 0x30 + i as u32,
+            });
+        }
+
+        let this = Self { hotkeys };
 
         let mut errs = Vec::new();
         for hotkey in &this.hotkeys {
