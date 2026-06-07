@@ -1,3 +1,5 @@
+use windows::core::w;
+
 /// Cắt chuỗi `s` thành `max_len` ký tự, thêm `...` nếu chuỗi dài hơn.
 pub fn truncate(s: &str, max_len: usize) -> String {
     match s.char_indices().nth(max_len) {
@@ -31,6 +33,7 @@ pub fn clean_button_name(name: &str) -> String {
     name.to_string()
 }
 
+/// Kiểm tra xem một class name có phải là class hệ thống hay không.
 pub fn is_system_class(class_name: &str) -> bool {
     matches!(
         class_name,
@@ -43,4 +46,22 @@ pub fn is_system_class(class_name: &str) -> bool {
         "DwmWindowComposition" |  // DWM
         "SysAnimate32" // Animation
     )
+}
+
+/// Kiểm tra xem hệ thống đang sử dụng theme light hay dark.
+pub fn is_light_theme() -> bool {
+    let mut value: u32 = 0;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    let res = unsafe {
+        windows::Win32::System::Registry::RegGetValueW(
+            windows::Win32::System::Registry::HKEY_CURRENT_USER,
+            w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+            w!("SystemUsesLightTheme"),
+            windows::Win32::System::Registry::RRF_RT_REG_DWORD,
+            None,
+            Some(&mut value as *mut _ as *mut _),
+            Some(&mut size),
+        )
+    };
+    res.is_ok() && value != 0
 }

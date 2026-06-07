@@ -1,4 +1,4 @@
-// #![windows_subsystem = "windows"]
+#![windows_subsystem = "windows"]
 
 mod app;
 mod event;
@@ -11,10 +11,12 @@ mod types;
 mod utils;
 
 use tracing::info;
+use windows::Win32::System::Console::{AllocConsole, AttachConsole, ATTACH_PARENT_PROCESS};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 
 #[derive(Default)]
 struct Args {
+    debug: bool,
     verbose: bool,
     combine_enabled: bool,
     console_worker: bool,
@@ -23,6 +25,7 @@ struct Args {
 fn parse_args() -> Args {
     let raw: Vec<String> = std::env::args().collect();
     Args {
+        debug: raw.iter().any(|a| a == "--debug"),
         verbose: raw.iter().any(|a| a == "-v" || a == "--verbose"),
         combine_enabled: raw.iter().any(|a| a == "--combine-mode"),
         console_worker: raw.iter().any(|a| a == "--console-worker"),
@@ -37,7 +40,8 @@ fn print_help(args: &Args) {
         \n\tRight-click tray icon : menu\
         \n\
         \n\t-v/--verbose: enable debug logging\
-        \n\t--combine-mode: enable combine mode",
+        \n\t--combine-mode: enable combine mode\
+        \n\t--debug: attach console for debugging",
     );
 
     if args.verbose {
@@ -48,10 +52,26 @@ fn print_help(args: &Args) {
         info.push_str("\nCombine mode enabled");
     }
 
+    if args.debug {
+        info.push_str("\nDebug console enabled");
+    }
+
     println!("{}\n", info);
 }
 
 fn main() -> anyhow::Result<()> {
+    let args = parse_args();
+
+    if args.debug {
+        unsafe {
+            // Thử đính kèm vào console của process cha (ví dụ: powershell hoặc cmd)
+            if AttachConsole(ATTACH_PARENT_PROCESS).is_err() {
+                // Nếu không có process cha có console (ví dụ: chạy từ File Explorer), tạo console mới
+                let _ = AllocConsole();
+            }
+        }
+    }
+
     unsafe {
         // Thông báo cho Windows: "Tôi tự lo được màn hình độ phân giải cao (Per-Monitor v2),
         // đừng tự zoom mờ app của tôi!"
@@ -60,14 +80,22 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    let args = parse_args();
-
     print_help(&args);
 
     if args.console_worker {
         logging::console::run_worker();
         return Ok(());
     }
+    // if args.debug {
+    //     unsafe {
+    //         // Thử đính kèm vào console của process cha (ví dụ: đang chạy bằng powershell hoặc cmd)
+    //         if AttachConsole(ATTACH_PARENT_PROCESS).is_err() {
+    //             // Nếu không có process cha có console (ví dụ: click đúp chạy từ File Explorer), tạo một console mới
+    //             let _ = AllocConsole();
+    //         }
+    //     }
+    // }
+
     let _guard = logging::setup_logger(args.verbose);
 
     let main_thread_id = unsafe { GetCurrentThreadId() };
