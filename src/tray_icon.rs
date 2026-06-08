@@ -16,9 +16,11 @@ const ICON_BYTES: &[u8] = include_bytes!("../assets/icon.ico");
 pub const IDM_EXIT: u32 = 1;
 pub const IDM_COMBINE_MODE: u32 = 2;
 pub const IDM_SHOW_CONSOLE: u32 = 3;
+pub const IDM_SETTINGS: u32 = 4;
 
 const TEXT_COMBINE_MODE: PCWSTR = w!("Combine Mode");
 const TEXT_SHOW_CONSOLE: PCWSTR = w!("Debug Console");
+const TEXT_SETTINGS: PCWSTR = w!("Settings...");
 const TEXT_EXIT: PCWSTR = w!("Exit");
 
 /// Quản lý vòng đời và hành vi của biểu tượng trên khay hệ thống Windows.
@@ -169,6 +171,7 @@ impl TrayIcon {
                 TEXT_SHOW_CONSOLE,
             )?;
 
+            AppendMenuW(hmenu, MF_STRING, IDM_SETTINGS as usize, TEXT_SETTINGS)?;
             AppendMenuW(hmenu, MF_SEPARATOR, 0, PCWSTR::null())?;
             AppendMenuW(hmenu, MF_STRING, IDM_EXIT as usize, TEXT_EXIT)?;
 

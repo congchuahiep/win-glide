@@ -21,8 +21,9 @@ use crate::event::{self, InvalidateSource};
 use crate::hotkey::{HotkeyAction, HotkeyManager};
 use crate::indicator::IndicatorWindow;
 use crate::logging::console::{self, CONSOLE_VISIBLE};
+use crate::settings_ui;
 use crate::taskbar::{CycleDirection, TaskbarEnumerator, UncombineManager};
-use crate::tray_icon::{TrayIcon, IDM_COMBINE_MODE, IDM_EXIT, IDM_SHOW_CONSOLE};
+use crate::tray_icon::{TrayIcon, IDM_COMBINE_MODE, IDM_EXIT, IDM_SETTINGS, IDM_SHOW_CONSOLE};
 
 /// Định danh thông điệp Windows động "TaskbarCreated".
 /// Thông điệp này được gửi khi tiến trình Explorer khởi động lại.
@@ -128,38 +129,6 @@ impl App {
         tray_icon.register(hidden_window.hwnd)?;
 
         let indicator_window = unsafe { IndicatorWindow::new()? };
-
-        // let (tx, rx) = std::sync::mpsc::channel::<winvd::DesktopEvent>();
-
-        // let desktop_event_thread = match winvd::listen_desktop_events(tx) {
-        //     Ok(thread) => {
-        //         std::thread::spawn(move || {
-        //             while let Ok(_event) = rx.recv() {
-        //                 unsafe {
-        //                     let hwnd_ind = windows::Win32::Foundation::HWND(hwnd_ind_ptr as *mut _);
-        //                     let _ = windows::Win32::Graphics::Gdi::InvalidateRect(
-        //                         Some(hwnd_ind),
-        //                         None,
-        //                         true,
-        //                     );
-
-        //                     // Gửi một tín hiệu rỗng để đánh thức vòng lặp GetMessageW của main Thread
-        //                     let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-        //                         Some(hwnd_ind),
-        //                         windows::Win32::UI::WindowsAndMessaging::WM_NULL,
-        //                         windows::Win32::Foundation::WPARAM(0),
-        //                         windows::Win32::Foundation::LPARAM(0),
-        //                     );
-        //                 }
-        //             }
-        //         });
-        //         Some(thread)
-        //     }
-        //     Err(e) => {
-        //         tracing::error!("Failed to start winvd desktop event listener: {:?}", e);
-        //         None
-        //     }
-        // };
 
         Ok(Self {
             enumerator,
@@ -288,6 +257,10 @@ impl App {
                     }
                     IDM_SHOW_CONSOLE => {
                         console::toggle();
+                    }
+                    IDM_SETTINGS => {
+                        info!("Opening settings UI");
+                        settings_ui::show();
                     }
                     _ => {}
                 }

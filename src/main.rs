@@ -5,6 +5,7 @@ mod event;
 mod hotkey;
 mod indicator;
 mod logging;
+mod settings_ui;
 mod taskbar;
 mod tray_icon;
 mod types;
@@ -16,6 +17,9 @@ use tracing::info;
 use windows::Win32::System::Console::{AllocConsole, AttachConsole, ATTACH_PARENT_PROCESS};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::HiDpi;
+use windows_reactor::App;
+
+use crate::settings_ui::settings_app;
 
 #[derive(Default)]
 struct Args {
@@ -23,6 +27,7 @@ struct Args {
     verbose: bool,
     combine_enabled: bool,
     console_worker: bool,
+    settings_ui: bool,
 }
 
 fn parse_args() -> Args {
@@ -32,6 +37,7 @@ fn parse_args() -> Args {
         verbose: raw.iter().any(|a| a == "-v" || a == "--verbose"),
         combine_enabled: raw.iter().any(|a| a == "--combine-mode"),
         console_worker: raw.iter().any(|a| a == "--console-worker"),
+        settings_ui: raw.iter().any(|a| a == "--settings-ui"),
     }
 }
 
@@ -63,13 +69,6 @@ fn print_help(args: &Args) {
 }
 
 fn main() -> anyhow::Result<()> {
-    unsafe {
-        // Thông báo cho Windows: "Tôi tự lo được màn hình độ phân giải cao (Per-Monitor v2),
-        // đừng tự zoom mờ app của tôi!"
-        let _ =
-            HiDpi::SetProcessDpiAwarenessContext(HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    }
-
     let args = parse_args();
 
     if args.debug {
@@ -86,9 +85,30 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if args.settings_ui {
+        let _guard = logging::setup_logger(args.verbose);
+        tracing::info!("Starting settings UI process");
+
+        match settings_ui::run() {
+            Ok(_) => {
+                tracing::info!("settings UI exited normally");
+            }
+            Err(e) => {
+                tracing::error!("settings UI Error: {:?}", e);
+            }
+        }
+        return Ok(());
+    }
+
     print_help(&args);
 
     let _guard = logging::setup_logger(args.verbose);
+
+    // Cấu hình DPI Aware cho tiến trình background
+    unsafe {
+        let _ =
+            HiDpi::SetProcessDpiAwarenessContext(HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
 
     let main_thread_id = unsafe { GetCurrentThreadId() };
     let mut app = app::App::new(args.combine_enabled)?;
@@ -98,5 +118,6 @@ fn main() -> anyhow::Result<()> {
     }
 
     info!("Taskbar Switcher stopped");
+
     Ok(())
 }
