@@ -12,6 +12,40 @@ use crate::utils;
 
 const WM_APP_VD_EVENT: u32 = WM_USER + 0x100;
 
+static HOVER_INDEX: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(-1);
+
+fn get_hovered_index(x: i32, y: i32) -> Option<usize> {
+    unsafe {
+        let mut tray_rect = RECT::default();
+        if let Ok(taskbar_hwnd) = FindWindowW(w!("Shell_TrayWnd"), None) {
+            let _ = GetWindowRect(taskbar_hwnd, &mut tray_rect);
+        }
+        let height = tray_rect.bottom - tray_rect.top;
+        if height <= 0 {
+            return None;
+        }
+
+        let radius = height as f32 * 0.08;
+        let spacing = radius * 4.5;
+        let start_x = 10.0 + radius;
+        let cy = height as f32 / 2.0;
+
+        let px = x as f32;
+        let py = y as f32;
+
+        let count = winvd::get_desktop_count().unwrap_or(1) as usize;
+        let half_spacing = spacing / 2.0;
+        for i in 0..count {
+            let cx = start_x + (i as f32) * spacing;
+            // Chuyển sang Hit-box hình chữ nhật (như khối div), nối liền nhau không có khoảng trống
+            if px >= cx - half_spacing && px <= cx + half_spacing {
+                return Some(i);
+            }
+        }
+        None
+    }
+}
+
 /// Cửa sổ hiển thị trạng thái (Indicator) trên Taskbar.
 /// Nó sử dụng cờ `WS_EX_LAYERED` kết hợp với `UpdateLayeredWindow` để vẽ đồ họa 32-bit có kênh Alpha (trong suốt).
 pub struct IndicatorWindow {
@@ -47,7 +81,7 @@ impl IndicatorWindow {
         let taskbar_height = tray_rect.bottom - tray_rect.top;
 
         let hwnd = CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
+            WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             class_name,
             w!("Indicator"),
             WS_POPUP | WS_VISIBLE,
@@ -150,15 +184,19 @@ impl IndicatorWindow {
                 buffer.fill(0);
 
                 let light_mode = utils::is_light_theme();
-                let theme_color = match light_mode {
+                let button_theme_color = match light_mode {
                     true => (20, 20, 20),
                     false => (255, 255, 255),
+                };
+                let hitbox_theme_color = match light_mode {
+                    true => (255, 255, 255),
+                    false => (100, 100, 100),
                 };
 
                 // Taskbar ở 1080p thường cao 48px, ở 4K (200%) cao 96px.
                 // Việc bám theo chiều cao Taskbar giúp tỷ lệ luôn chuẩn xác 100% trên mọi màn hình.
-                let radius = height as f32 * 0.08; // Bán kính = 8% chiều cao (tương đương ~3.8px ở 1080p)
-                let spacing = radius * 4.5;
+                let radius = height as f32 * 0.07; // Bán kính = 7% chiều cao (tương đương ~3.36px ở 1080p)
+                let spacing = radius * 5.;
                 let start_x = 10.0 + radius;
                 let cy = height as f32 / 2.0;
 
@@ -175,12 +213,41 @@ impl IndicatorWindow {
                     }
                 }
 
+                let hover_idx = HOVER_INDEX.load(std::sync::atomic::Ordering::Relaxed);
+
                 for i in 0..count {
                     let cx = start_x + (i as f32) * spacing;
-                    let base_alpha = match i == current_idx {
-                        true => 1.0,
-                        false => 0.5,
+                    let is_hovered = hover_idx == (i as isize);
+
+                    // Vẽ khối Div vô hình (Alpha = 1) làm Hitbox bao quanh chấm tròn.
+                    // Nếu đang hover, vẽ thêm nền bo góc nhẹ (Alpha = 0.15)
+                    Self::draw_hitbox_and_bg(
+                        buffer,
+                        width,
+                        height,
+                        cx,
+                        spacing,
+                        is_hovered,
+                        hitbox_theme_color,
+                    );
+
+                    let is_active = i == current_idx;
+
+                    let mut current_radius = radius;
+                    let mut base_alpha = if is_active {
+                        current_radius *= 1.25; // Active indicator to bằng lúc hover
+                        1.0
+                    } else {
+                        0.5
                     };
+
+                    // Hiệu ứng Hover
+                    if is_hovered {
+                        current_radius = radius * 1.25; // Đảm bảo phóng to 25% (không nhân đôi nếu vừa active vừa hover)
+                        if base_alpha < 0.8 {
+                            base_alpha = 0.8; // Làm sáng lên
+                        }
+                    }
 
                     Self::draw_aa_circle(
                         buffer,
@@ -188,8 +255,8 @@ impl IndicatorWindow {
                         height,
                         cx,
                         cy,
-                        radius,
-                        theme_color,
+                        current_radius,
+                        button_theme_color,
                         base_alpha,
                     );
                 }
@@ -229,6 +296,83 @@ impl IndicatorWindow {
 
             let _ = DeleteDC(mem_dc);
             ReleaseDC(None, screen_dc);
+        }
+    }
+
+    /// Vẽ khối hình chữ nhật "vô hình" (Hitbox) và nền mờ bo góc khi Hover
+    fn draw_hitbox_and_bg(
+        buffer: &mut [u32],
+        width: i32,
+        height: i32,
+        cx: f32,
+        spacing: f32,
+        is_hovered: bool,
+        theme_color: (u8, u8, u8),
+    ) {
+        let half_spacing = spacing / 2.0;
+        let min_x = (cx - half_spacing).floor().max(0.0) as i32;
+        let max_x = (cx + half_spacing).ceil().min((width - 1) as f32) as i32;
+        let min_y = 0;
+        let max_y = height - 1;
+
+        let cy = height as f32 / 2.0;
+
+        // bg_rw: Bán kính chiều ngang của nền hover (Width = bg_rw * 2)
+        // Thay vì trừ đi margin, ta để nguyên `spacing / 2.0` để các nền hover chạm sát vào nhau (không có gap)
+        let bg_rw = spacing / 2.0;
+
+        // bg_rh: Bán kính chiều dọc của nền hover (Height = bg_rh * 2)
+        // Trừ đi 6px để tạo khoảng cách (padding) so với mép trên/dưới của thanh Taskbar
+        let bg_rh = (height as f32) / 2.0 - 6.0;
+
+        // Độ bo góc của nền hover (Càng lớn càng tròn, tối đa bằng bg_rh)
+        let corner_radius = 6.0;
+
+        let inner_w = bg_rw - corner_radius;
+        let inner_h = bg_rh - corner_radius;
+        let (r, g, b) = theme_color;
+
+        let base_alpha = 0.3; // Độ trong suốt của nền hover
+
+        for y in min_y..=max_y {
+            for x in min_x..=max_x {
+                let px = x as f32 + 0.5;
+                let py = y as f32 + 0.5;
+                let idx = (y * width + x) as usize;
+                if idx >= buffer.len() {
+                    continue;
+                }
+
+                if is_hovered {
+                    let dx = (px - cx).abs() - inner_w;
+                    let dy = (py - cy).abs() - inner_h;
+                    let dist = dx.max(0.0).hypot(dy.max(0.0)) + dx.max(dy).min(0.0) - corner_radius;
+
+                    let mut alpha = if dist <= -0.5 {
+                        1.0
+                    } else if dist >= 0.5 {
+                        0.0
+                    } else {
+                        0.5 - dist
+                    };
+
+                    alpha *= base_alpha;
+
+                    if alpha > 0.0 {
+                        let a = (alpha * 255.0) as u32;
+                        let pr = (r as f32 * alpha) as u32;
+                        let pg = (g as f32 * alpha) as u32;
+                        let pb = (b as f32 * alpha) as u32;
+                        buffer[idx] = (a << 24) | (pr << 16) | (pg << 8) | pb;
+                        continue;
+                    }
+                }
+
+                // Invisible hitbox
+                if buffer[idx] == 0 {
+                    buffer[idx] = 0x01000000;
+                }
+            }
         }
     }
 
@@ -311,7 +455,56 @@ impl IndicatorWindow {
                 }
                 LRESULT(0)
             }
-            WM_NCHITTEST => LRESULT(-1),
+            WM_MOUSEMOVE => {
+                let x = ((lparam.0 as i32) << 16) >> 16;
+                let y = (lparam.0 as i32) >> 16;
+                let hovered = get_hovered_index(x, y);
+                let old = HOVER_INDEX.load(std::sync::atomic::Ordering::Relaxed);
+                let new_val = hovered.map(|i| i as isize).unwrap_or(-1);
+
+                if old != new_val {
+                    HOVER_INDEX.store(new_val, std::sync::atomic::Ordering::Relaxed);
+                    Self::render(hwnd);
+
+                    if new_val != -1 {
+                        let mut tme = windows::Win32::UI::Input::KeyboardAndMouse::TRACKMOUSEEVENT {
+                            cbSize: std::mem::size_of::<windows::Win32::UI::Input::KeyboardAndMouse::TRACKMOUSEEVENT>() as u32,
+                            dwFlags: windows::Win32::UI::Input::KeyboardAndMouse::TME_LEAVE,
+                            hwndTrack: hwnd,
+                            dwHoverTime: 0,
+                        };
+                        let _ = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::TrackMouseEvent(&mut tme) };
+                    }
+                }
+                LRESULT(0)
+            }
+            0x02A3 /* WM_MOUSELEAVE */ => {
+                HOVER_INDEX.store(-1, std::sync::atomic::Ordering::Relaxed);
+                Self::render(hwnd);
+                LRESULT(0)
+            }
+            WM_LBUTTONUP => {
+                let x = ((lparam.0 as i32) << 16) >> 16;
+                let y = (lparam.0 as i32) >> 16;
+                if let Some(idx) = get_hovered_index(x, y) {
+                    if let Ok(desktops) = winvd::get_desktops() {
+                        if idx < desktops.len() {
+                            let _ = winvd::switch_desktop(desktops[idx]);
+                        }
+                    }
+                }
+                LRESULT(0)
+            }
+            windows::Win32::UI::WindowsAndMessaging::WM_SETCURSOR => {
+                unsafe {
+                    let cursor = windows::Win32::UI::WindowsAndMessaging::LoadCursorW(
+                        None,
+                        windows::Win32::UI::WindowsAndMessaging::IDC_HAND
+                    ).unwrap();
+                    let _ = windows::Win32::UI::WindowsAndMessaging::SetCursor(Some(cursor));
+                }
+                LRESULT(1)
+            }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
     }

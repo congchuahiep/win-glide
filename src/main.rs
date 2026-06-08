@@ -60,7 +60,16 @@ fn print_help(args: &Args) {
 }
 
 fn main() -> anyhow::Result<()> {
+    unsafe {
+        // Thông báo cho Windows: "Tôi tự lo được màn hình độ phân giải cao (Per-Monitor v2),
+        // đừng tự zoom mờ app của tôi!"
+        let _ = windows::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
+            windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        );
+    }
+
     let args = parse_args();
+    print_help(&args);
 
     if args.debug {
         unsafe {
@@ -72,29 +81,10 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    unsafe {
-        // Thông báo cho Windows: "Tôi tự lo được màn hình độ phân giải cao (Per-Monitor v2),
-        // đừng tự zoom mờ app của tôi!"
-        let _ = windows::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
-            windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
-        );
-    }
-
-    print_help(&args);
-
     if args.console_worker {
         logging::console::run_worker();
         return Ok(());
     }
-    // if args.debug {
-    //     unsafe {
-    //         // Thử đính kèm vào console của process cha (ví dụ: đang chạy bằng powershell hoặc cmd)
-    //         if AttachConsole(ATTACH_PARENT_PROCESS).is_err() {
-    //             // Nếu không có process cha có console (ví dụ: click đúp chạy từ File Explorer), tạo một console mới
-    //             let _ = AllocConsole();
-    //         }
-    //     }
-    // }
 
     let _guard = logging::setup_logger(args.verbose);
 
