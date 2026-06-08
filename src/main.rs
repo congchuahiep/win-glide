@@ -5,7 +5,7 @@ mod event;
 mod hotkey;
 mod indicator;
 mod logging;
-mod settings_ui;
+mod setting;
 mod taskbar;
 mod tray_icon;
 mod types;
@@ -17,9 +17,6 @@ use tracing::info;
 use windows::Win32::System::Console::{AllocConsole, AttachConsole, ATTACH_PARENT_PROCESS};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::HiDpi;
-use windows_reactor::App;
-
-use crate::settings_ui::settings_app;
 
 #[derive(Default)]
 struct Args {
@@ -89,7 +86,7 @@ fn main() -> anyhow::Result<()> {
         let _guard = logging::setup_logger(args.verbose);
         tracing::info!("Starting settings UI process");
 
-        match settings_ui::run() {
+        match setting::run() {
             Ok(_) => {
                 tracing::info!("settings UI exited normally");
             }

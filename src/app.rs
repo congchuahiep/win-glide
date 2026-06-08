@@ -21,7 +21,7 @@ use crate::event::{self, InvalidateSource};
 use crate::hotkey::{HotkeyAction, HotkeyManager};
 use crate::indicator::IndicatorWindow;
 use crate::logging::console::{self, CONSOLE_VISIBLE};
-use crate::settings_ui;
+use crate::setting;
 use crate::taskbar::{CycleDirection, TaskbarEnumerator, UncombineManager};
 use crate::tray_icon::{TrayIcon, IDM_COMBINE_MODE, IDM_EXIT, IDM_SETTINGS, IDM_SHOW_CONSOLE};
 
@@ -260,7 +260,7 @@ impl App {
                     }
                     IDM_SETTINGS => {
                         info!("Opening settings UI");
-                        settings_ui::show();
+                        setting::show_ui();
                     }
                     _ => {}
                 }

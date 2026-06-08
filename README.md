@@ -4,7 +4,7 @@ A powerful, lightweight utility built in Rust designed to enhance navigation and
 
 ## Features
 
-- **Taskbar Navigation**: Use `Alt + [` and `Alt + ]` to instantly cycle through open applications on your taskbar (Left/Right).
+- **Cycle windows based on taskbar buttons**: Use `Alt + [` and `Alt + ]` to instantly cycle through open applications on your taskbar (Left/Right).
 - **Uncombine Taskbar Buttons**: Prevents taskbar buttons from being grouped together, giving you individual buttons for each window.
 - **Virtual Desktop Indicator**: Displays a visual indicator of your current virtual desktop position directly on the taskbar.
 - **Quick Switch Virtual Desktop**: Quickly jump to a specific virtual desktop using `Alt + <index>` (starting from 1).
