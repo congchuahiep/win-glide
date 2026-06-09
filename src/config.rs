@@ -20,6 +20,12 @@ pub struct AppConfig {
     pub hotkey_right_vk: u32,
     /// Các phím bổ trợ (Modifiers) của phím nóng di chuyển phải
     pub hotkey_right_modifiers: u32,
+
+    /// Cho phép hiển thị Desktop Indicator
+    pub desktop_indicator: bool,
+
+    /// Các phím bổ trợ cho Jump to Desktop (vd: Alt + <number>)
+    pub jump_desktop_modifiers: u32,
 }
 
 impl Default for AppConfig {
@@ -31,12 +37,14 @@ impl Default for AppConfig {
             hotkey_left_modifiers: MOD_ALT.0 as u32,
             hotkey_right_vk: VK_OEM_6.0 as u32,
             hotkey_right_modifiers: MOD_ALT.0 as u32,
+            desktop_indicator: true,
+            jump_desktop_modifiers: MOD_ALT.0 as u32,
         }
     }
 }
 
 impl AppConfig {
-    /// Lấy đường dẫn lưu file cấu hình (trong AppData/Roaming/taskbar-switcher)
+    /// Lấy đường dẫn lưu file cấu hình (trong AppData/Roaming/"better-windows-navigate)
     pub fn config_path() -> PathBuf {
         let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
         path.push("better-windows-navigate");
@@ -49,8 +57,14 @@ impl AppConfig {
     pub fn load() -> Self {
         let path = Self::config_path();
         match fs::read_to_string(&path) {
-            Ok(content) => match serde_json::from_str(&content) {
-                Ok(config) => config,
+            Ok(content) => match serde_json::from_str::<Self>(&content) {
+                Ok(mut config) => {
+                    // Force uncombine_mode to true if cycle_taskbar_based is true
+                    if config.cycle_taskbar_based {
+                        config.uncombine_mode = true;
+                    }
+                    config
+                }
                 Err(e) => {
                     tracing::error!("Failed to parse config.json: {}. Using default.", e);
                     Self::default()

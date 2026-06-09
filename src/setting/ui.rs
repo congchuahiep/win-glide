@@ -29,16 +29,17 @@ fn send_reload_signal() {
 /// Khung chính của ứng dụng cài đặt (Settings App).
 /// Gồm một luồng (`vstack`) chứa toàn bộ các khối nội dung, padding đều ra xung quanh.
 pub fn settings_app(cx: &mut RenderCx) -> Element {
-    vstack((
+    let content = vstack((
         header(),
         taskbar_settings(cx),
         virtual_desktop_settings(cx),
         logging(),
         footer(),
     ))
-    .spacing(24.0)
-    .margin(24.0)
-    .into()
+    .spacing(32.0)
+    .margin(24.0);
+
+    scroll_viewer(content).into()
 }
 
 /// Khối Header hiển thị Tiêu đề và Mô tả chính của App.
@@ -67,22 +68,20 @@ fn taskbar_settings(cx: &mut RenderCx) -> Element {
         setting_item(
             &SettingItemProps {
                 icon: Some('\u{E7C4}'),
-                title: "Uncombine Mode".into(),
+                title: Some("Uncombine taskbar buttons".into()),
                 description: Some("Disallow group windows on the taskbar".into()),
                 action: Some(
                     ToggleSwitch::new(config.uncombine_mode)
+                        .enabled(!config.cycle_taskbar_based)
                         .on_content("")
                         .off_content("")
+                        .width(42.)
                         .min_width(0.0)
-                        .margin(Thickness {
-                            right: -10.,
-                            ..Default::default()
-                        })
                         .on_changed({
                             let set_config = set_config.clone();
-                            let config_state = config.clone();
                             move |is_on: bool| {
-                                let mut new_config = config_state.clone();
+                                let mut new_config = crate::config::AppConfig::load();
+                                if new_config.uncombine_mode == is_on { return; }
                                 new_config.uncombine_mode = is_on;
                                 new_config.save();
                                 set_config.call(new_config);
@@ -91,30 +90,30 @@ fn taskbar_settings(cx: &mut RenderCx) -> Element {
                         })
                         .into(),
                 ),
-                children: None,
+                children: None, always_expand: false,
             },
             cx,
         ),
         setting_item(
             &SettingItemProps {
                 icon: Some('\u{E8AB}'),
-                title: "Cycle taskbar buttons".into(),
+                title: Some("Cycle taskbar buttons".into()),
                 description: Some("Switch windows based on taskbar buttons".into()),
                 action: Some(
                     ToggleSwitch::new(config.cycle_taskbar_based)
                         .on_content("")
                         .off_content("")
+                        .width(42.)
                         .min_width(0.0)
-                        .margin(Thickness {
-                            right: -10.,
-                            ..Default::default()
-                        })
                         .on_changed({
                             let set_config = set_config.clone();
-                            let config_state = config.clone();
                             move |is_on: bool| {
-                                let mut new_config = config_state.clone();
+                                let mut new_config = crate::config::AppConfig::load();
+                                if new_config.cycle_taskbar_based == is_on { return; }
                                 new_config.cycle_taskbar_based = is_on;
+                                if is_on {
+                                    new_config.uncombine_mode = true;
+                                }
                                 new_config.save();
                                 set_config.call(new_config);
                                 send_reload_signal();
@@ -122,10 +121,18 @@ fn taskbar_settings(cx: &mut RenderCx) -> Element {
                         })
                         .into(),
                 ),
+                always_expand: true,
                 children: Some(vec![
                     SettingItemProps {
                         icon: None,
-                        title: "Cycle left".into(),
+                        title: None,
+                        description: Some("By default, 'Cycle taskbar buttons' automatically uncombines buttons because it handles button groups poorly".into()),
+                        action: None,
+                        children: None, always_expand: false,
+                    },
+                    SettingItemProps {
+                        icon: None,
+                        title: Some("Cycle left".into()),
                         description: None,
                         action: Some(hotkey_button::render_hotkey_button(
                             (config.hotkey_left_modifiers, config.hotkey_left_vk),
@@ -153,11 +160,11 @@ fn taskbar_settings(cx: &mut RenderCx) -> Element {
                             },
                             cx,
                         )),
-                        children: None,
+                        children: None, always_expand: false,
                     },
                     SettingItemProps {
                         icon: None,
-                        title: "Cycle right".into(),
+                        title: Some("Cycle right".into()),
                         description: None,
                         action: Some(hotkey_button::render_hotkey_button(
                             (config.hotkey_right_modifiers, config.hotkey_right_vk),
@@ -185,7 +192,7 @@ fn taskbar_settings(cx: &mut RenderCx) -> Element {
                             },
                             cx,
                         )),
-                        children: None,
+                        children: None, always_expand: false,
                     },
                 ]),
             },
@@ -199,6 +206,57 @@ fn taskbar_settings(cx: &mut RenderCx) -> Element {
 fn virtual_desktop_settings(cx: &mut RenderCx) -> Element {
     let (config, set_config) = cx.use_state(AppConfig::load());
 
+    // Khởi tạo các cờ cho toggle buttons
+    let has_ctrl = config.jump_desktop_modifiers
+        & windows::Win32::UI::Input::KeyboardAndMouse::MOD_CONTROL.0 as u32
+        != 0;
+    let has_alt = config.jump_desktop_modifiers
+        & windows::Win32::UI::Input::KeyboardAndMouse::MOD_ALT.0 as u32
+        != 0;
+
+    let update_modifier = {
+        let set_config = set_config.clone();
+        let config_state = config.clone();
+        std::rc::Rc::new(move |mod_flag: u32, is_checked: bool| {
+            let mut new_config = config_state.clone();
+            if is_checked {
+                new_config.jump_desktop_modifiers |= mod_flag;
+            } else {
+                new_config.jump_desktop_modifiers &= !mod_flag;
+            }
+            new_config.save();
+            set_config.call(new_config);
+            send_reload_signal();
+        })
+    };
+
+    let ctrl_btn = toggle_button("Ctrl", has_ctrl).on_changed({
+        let update_modifier = update_modifier.clone();
+        move |checked| {
+            update_modifier(
+                windows::Win32::UI::Input::KeyboardAndMouse::MOD_CONTROL.0 as u32,
+                checked,
+            )
+        }
+    });
+    let alt_btn = toggle_button("Alt", has_alt).on_changed({
+        let update_modifier = update_modifier.clone();
+        move |checked| {
+            update_modifier(
+                windows::Win32::UI::Input::KeyboardAndMouse::MOD_ALT.0 as u32,
+                checked,
+            )
+        }
+    });
+
+    let jump_modifiers_action = hstack((ctrl_btn, alt_btn))
+        .spacing(4.0)
+        .margin(Thickness {
+            right: 10.,
+            ..Default::default()
+        })
+        .vertical_alignment(VerticalAlignment::Center);
+
     vstack((
         body_strong("Virtual Desktop").margin(Thickness {
             bottom: 10.,
@@ -207,30 +265,40 @@ fn virtual_desktop_settings(cx: &mut RenderCx) -> Element {
         setting_item(
             &SettingItemProps {
                 icon: Some('\u{E712}'),
-                title: "Desktop Indicator".into(),
+                title: Some("Desktop Indicator".into()),
                 description: Some("Show the virtual desktop indicator on the taskbar".into()),
                 action: Some(
-                    ToggleSwitch::new(true)
+                    ToggleSwitch::new(config.desktop_indicator)
                         .on_content("")
                         .off_content("")
                         .min_width(0.0)
-                        .margin(Thickness {
-                            right: -10.,
-                            ..Default::default()
+                        .width(42.)
+                        .on_changed({
+                            let set_config = set_config.clone();
+                            let config_state = config.clone();
+                            move |checked| {
+                                let mut new_config = config_state.clone();
+                                new_config.desktop_indicator = checked;
+                                new_config.save();
+                                set_config.call(new_config);
+                                send_reload_signal();
+                            }
                         })
                         .into(),
                 ),
                 children: None,
+                always_expand: false,
             },
             cx,
         ),
         setting_item(
             &SettingItemProps {
                 icon: Some('\u{E7B5}'),
-                title: "Jump to Desktop".into(),
-                description: Some("Quickly jump to the desktop by index".into()),
-                action: None,
+                title: Some("Jump to Desktop".into()),
+                description: Some("Change the desktop by index. e.g Alt+1, Alt+2".into()),
+                action: Some(jump_modifiers_action.into()),
                 children: None,
+                always_expand: false,
             },
             cx,
         ),
@@ -272,7 +340,7 @@ pub fn run() -> Result<()> {
     App::new()
         .title("Better Windows navigate's settings")
         .backdrop(Backdrop::Mica)
-        .inner_size(500., 600.)
+        .inner_size(500., 720.)
         .inner_constraints(InnerConstraints {
             min_width: Some(500.),
             min_height: Some(540.),

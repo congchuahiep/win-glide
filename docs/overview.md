@@ -71,7 +71,7 @@ graph LR
 
     K["Bàn phím<br>Chuột"] -->|"WM_KEYDOWN<br>WM_HOTKEY"| MQ
     W["Cửa sổ khác"] -->|"WM_PAINT<br>WM_SIZE"| MQ
-    MQ -->|"Đọc tin nhắn"| APP["taskbar_switcher.exe<br>GetMessageW()"]
+    MQ -->|"Đọc tin nhắn"| APP["better-windows-navigate.exe<br>GetMessageW()"]
 ```
 
 Windows gửi **tin nhắn (message)** cho mỗi thread có cửa sổ. Mỗi tin nhắn có:
@@ -99,7 +99,7 @@ while GetMessageW(&mut msg, None, 0, 0) {
 
 ```mermaid
 sequenceDiagram
-    participant App as taskbar_switcher.exe
+    participant App as better-windows-navigate.exe
     participant Win as Windows OS
 
     App->>Win: RegisterHotKey(None, 1, MOD_ALT, VK_OEM_4)
@@ -261,7 +261,7 @@ fn callback(hwnd, ...) -> BOOL {
 
 ```mermaid
 sequenceDiagram
-    participant App as taskbar_switcher<br>(PID 9999)
+    participant App as better-windows-navigate<br>(PID 9999)
     participant OS as Windows OS
     participant Target as TruyVanSQL<br>(PID 5678)
     participant Current as VS Code<br>(PID 9012 - đang focus)

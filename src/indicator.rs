@@ -515,3 +515,4 @@ impl Drop for IndicatorWindow {
         }
     }
 }
+

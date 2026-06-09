@@ -14,13 +14,15 @@ pub struct SettingItemProps {
     /// Biểu tượng của mục cài đặt (nếu có)
     pub icon: Option<char>,
     /// Tiêu đề chính
-    pub title: String,
+    pub title: Option<String>,
     /// Mô tả chi tiết phụ cho tiêu đề (hiển thị mờ và nhỏ hơn ở dưới)
     pub description: Option<String>,
     /// Element tương tác ở góc phải (VD: ToggleSwitch, Button)
     pub action: Option<Element>,
     /// Danh sách các mục con. Nếu có, thẻ cài đặt này sẽ biến thành dạng Expander (có thể xổ xuống)
     pub children: Option<Vec<SettingItemProps>>,
+    /// Nếu true, phần tử children sẽ luôn được hiển thị mà không có icon Chevron để thu gọn
+    pub always_expand: bool,
 }
 
 /// Nhận `action_element` từ ngoài vào để tránh việc phải clone toàn bộ `SettingItemProps`
@@ -29,6 +31,11 @@ fn render_inner_layout(
     action_element: Element,
     is_child: bool,
 ) -> Element {
+    let title = props
+        .title
+        .as_deref()
+        .map_or(Element::Empty, |title| body(title).into());
+
     let description_el = props.description.as_ref().map_or(Element::Empty, |desc| {
         caption(desc.clone())
             .font_size(12.0)
@@ -37,7 +44,11 @@ fn render_inner_layout(
             .into()
     });
 
-    let content = vstack((body(props.title.clone()), description_el));
+    let content = vstack((title, description_el)).padding(Thickness {
+        top: 4.,
+        bottom: 4.,
+        ..Default::default()
+    });
 
     // Gom nhóm các thuộc tính phụ thuộc vào icon để tính toán 1 lần
     let (icon_el, icon_col_width, content_margin_left) = match props.icon {
@@ -68,7 +79,11 @@ fn render_inner_layout(
             .margin(Thickness {
                 left: 0.0,
                 top: 0.0,
-                right: 4.0,
+                right: if (props.children.is_some() && !props.always_expand) || is_child {
+                    4.0
+                } else {
+                    16.0
+                },
                 bottom: 0.0,
             })
             .grid_column(2),
@@ -85,44 +100,39 @@ fn render_inner_layout(
 /// có khả năng xổ xuống (slide down animation) bằng cách kết hợp `ScrollViewer` và `LayoutAnimation`.
 /// Nếu không, nó sẽ trả về một `Border` tĩnh chứa cấu hình.
 pub fn setting_item(props: &SettingItemProps, cx: &mut RenderCx) -> Element {
-    let (is_expanded, set_expanded) = cx.use_state(false);
+    let (is_expanded, set_expanded) = cx.use_state(props.always_expand);
 
     tracing::debug!(
         "DEBUG: setting_item rendered. title={}, is_expanded={}",
-        props.title,
+        props.title.as_deref().unwrap_or_default(),
         is_expanded
     );
 
-    let mut action_elements = Vec::new();
-    if let Some(act) = &props.action {
-        action_elements.push(act.clone());
-    }
-
-    if props.children.is_some() {
-        let chevron_char = if is_expanded { "\u{E70E}" } else { "\u{E70D}" };
-        let chevron_btn = button(chevron_char)
-            .font_family("Segoe Fluent Icons")
+    let chevron_or_empty = if props.always_expand {
+        Element::Empty
+    } else {
+        let chevron_char = if is_expanded { '\u{E70E}' } else { '\u{E70D}' };
+        font_icon(chevron_char)
             .font_size(14.0)
             .height(32.0)
             .width(32.0)
-            .padding(0.0)
-            .subtle()
-            .on_click({
-                let set_expanded = set_expanded.clone();
-                move || set_expanded.call(!is_expanded)
-            });
+            .into()
+    };
 
-        action_elements.push(chevron_btn.into());
-    }
-
-    let final_action = match action_elements.len() {
-        0 => Element::Empty,
-        1 => action_elements.pop().unwrap(),
-        _ => hstack(action_elements)
-            .vertical_alignment(VerticalAlignment::Center)
-            .horizontal_alignment(HorizontalAlignment::Right)
+    let final_action = if props.children.is_some() {
+        if props.always_expand {
+            props.action.clone().unwrap_or(Element::Empty)
+        } else {
+            hstack((
+                props.action.clone().unwrap_or(Element::Empty),
+                chevron_or_empty,
+            ))
             .spacing(6.0)
-            .into(),
+            .vertical_alignment(VerticalAlignment::Center)
+            .into()
+        }
+    } else {
+        props.action.clone().unwrap_or(Element::Empty)
     };
 
     let header_layout = border(render_inner_layout(props, final_action, false))
@@ -184,10 +194,19 @@ pub fn setting_item(props: &SettingItemProps, cx: &mut RenderCx) -> Element {
         card_elements.push(children_container);
     }
 
-    border(vstack(card_elements).horizontal_alignment(HorizontalAlignment::Stretch))
+    let base = border(vstack(card_elements).horizontal_alignment(HorizontalAlignment::Stretch))
         .corner_radius(4.0)
         .border_thickness(Thickness::from(1.0))
         .border_brush(ThemeRef::CardStroke)
-        .with_layout_animation(LayoutAnimationConfig::spring().animate_size(true))
+        .with_layout_animation(LayoutAnimationConfig::spring().animate_size(true));
+
+    if props.children.is_some() && !props.always_expand {
+        let set_expanded = set_expanded.clone();
+        base.on_pointer_pressed(move |_| {
+            set_expanded.call(!is_expanded);
+        })
         .into()
+    } else {
+        base.into()
+    }
 }

@@ -7,7 +7,7 @@
 //! - **Alt + ]**: Di chuyển tiêu điểm sang nút Taskbar bên phải ([`HotkeyAction::Right`])
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT,
+    RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS,
 };
 
 /// Các hành động có thể kích hoạt bởi phím nóng toàn cục
@@ -70,29 +70,33 @@ impl HotkeyManager {
     /// Trả về lỗi nếu không thể đăng ký một hoặc nhiều phím nóng (thường do xung đột phím nóng với
     /// phần mềm khác).
     pub fn new(config: &crate::config::AppConfig) -> anyhow::Result<Self> {
-        let mut hotkeys = vec![
-            Hotkey {
+        let mut hotkeys = vec![];
+
+        if config.cycle_taskbar_based {
+            hotkeys.push(Hotkey {
                 id: 1,
                 action: HotkeyAction::CycleLeft,
                 modifiers: HOT_KEY_MODIFIERS(config.hotkey_left_modifiers),
                 vk: config.hotkey_left_vk,
-            },
-            Hotkey {
+            });
+            hotkeys.push(Hotkey {
                 id: 2,
                 action: HotkeyAction::CycleRight,
                 modifiers: HOT_KEY_MODIFIERS(config.hotkey_right_modifiers),
                 vk: config.hotkey_right_vk,
-            },
-        ];
-
-        // Đăng ký Alt + 1 đến Alt + 9 (Virtual Key 0x31 - 0x39)
-        for i in 1..=9 {
-            hotkeys.push(Hotkey {
-                id: 10 + i as i32,
-                action: HotkeyAction::SwitchVirtualDesktop(i as u32 - 1),
-                modifiers: MOD_ALT,
-                vk: 0x30 + i as u32,
             });
+        }
+
+        // Đăng ký phím nóng Switch Desktop nếu có ít nhất 1 phím bổ trợ
+        if config.jump_desktop_modifiers != 0 {
+            for i in 1..=9 {
+                hotkeys.push(Hotkey {
+                    id: 10 + i as i32,
+                    action: HotkeyAction::SwitchVirtualDesktop(i as u32 - 1),
+                    modifiers: HOT_KEY_MODIFIERS(config.jump_desktop_modifiers),
+                    vk: 0x30 + i as u32,
+                });
+            }
         }
 
         let this = Self { hotkeys };
@@ -133,27 +137,31 @@ impl HotkeyManager {
 
         self.hotkeys.clear();
 
-        self.hotkeys.push(Hotkey {
-            id: 1,
-            action: HotkeyAction::CycleLeft,
-            modifiers: HOT_KEY_MODIFIERS(config.hotkey_left_modifiers),
-            vk: config.hotkey_left_vk,
-        });
-
-        self.hotkeys.push(Hotkey {
-            id: 2,
-            action: HotkeyAction::CycleRight,
-            modifiers: HOT_KEY_MODIFIERS(config.hotkey_right_modifiers),
-            vk: config.hotkey_right_vk,
-        });
-
-        for i in 1..=9 {
+        if config.cycle_taskbar_based {
             self.hotkeys.push(Hotkey {
-                id: 10 + i as i32,
-                action: HotkeyAction::SwitchVirtualDesktop(i as u32 - 1),
-                modifiers: MOD_ALT,
-                vk: 0x30 + i as u32,
+                id: 1,
+                action: HotkeyAction::CycleLeft,
+                modifiers: HOT_KEY_MODIFIERS(config.hotkey_left_modifiers),
+                vk: config.hotkey_left_vk,
             });
+
+            self.hotkeys.push(Hotkey {
+                id: 2,
+                action: HotkeyAction::CycleRight,
+                modifiers: HOT_KEY_MODIFIERS(config.hotkey_right_modifiers),
+                vk: config.hotkey_right_vk,
+            });
+        }
+
+        if config.jump_desktop_modifiers != 0 {
+            for i in 1..=9 {
+                self.hotkeys.push(Hotkey {
+                    id: 10 + i as i32,
+                    action: HotkeyAction::SwitchVirtualDesktop(i as u32 - 1),
+                    modifiers: HOT_KEY_MODIFIERS(config.jump_desktop_modifiers),
+                    vk: 0x30 + i as u32,
+                });
+            }
         }
 
         let mut errs = Vec::new();

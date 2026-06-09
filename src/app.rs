@@ -103,7 +103,7 @@ pub struct App {
     hidden_window: HiddenWindow,
 
     /// Cửa sổ Indicator hiển thị trạng thái Virtual Desktop.
-    indicator_window: IndicatorWindow,
+    indicator_window: Option<IndicatorWindow>,
 }
 
 impl App {
@@ -119,19 +119,21 @@ impl App {
         let enumerator = TaskbarEnumerator::new()?;
         let hotkey_manager = HotkeyManager::new(config)?;
         let uncombine_manager = Box::new(UncombineManager::new());
-
         let mut tray_icon = TrayIcon::create();
         let hidden_window = Self::create_hidden_window()?;
+
+        let indicator_window = if config.desktop_indicator {
+            unsafe { Some(IndicatorWindow::new()?) }
+        } else {
+            None
+        };
 
         unsafe {
             WM_TASKBARCREATED = RegisterWindowMessageW(w!("TaskbarCreated"));
         }
 
         tray_icon.register(hidden_window.hwnd)?;
-
         let uncombine_enabled = AtomicBool::new(config.uncombine_mode);
-
-        let indicator_window = unsafe { IndicatorWindow::new()? };
 
         Ok(Self {
             enumerator,
@@ -156,7 +158,9 @@ impl App {
     /// Hàm này bắt buộc phải được chạy trên luồng main đã khởi tạo COM dưới dạng STA
     /// (`COINIT_APARTMENTTHREADED`).
     pub unsafe fn run(&mut self, main_thread_id: u32) -> anyhow::Result<()> {
-        self.indicator_window.run();
+        if let Some(indicator) = &mut self.indicator_window {
+            indicator.run();
+        }
 
         SetWindowLongPtrW(
             self.hidden_window.hwnd,
@@ -388,6 +392,20 @@ impl App {
 
         if let Err(e) = self.hotkey_manager.reload(&config) {
             error!("Failed to reload hotkeys: {}", e);
+        }
+
+        if config.desktop_indicator && self.indicator_window.is_none() {
+            unsafe {
+                match IndicatorWindow::new() {
+                    Ok(mut ind) => {
+                        ind.run();
+                        self.indicator_window = Some(ind);
+                    }
+                    Err(e) => error!("Failed to create IndicatorWindow: {}", e),
+                }
+            }
+        } else if !config.desktop_indicator && self.indicator_window.is_some() {
+            self.indicator_window = None;
         }
 
         info!("Configuration reloaded successfully.");
