@@ -23,6 +23,8 @@ pub struct SettingItemProps {
     pub children: Option<Vec<SettingItemProps>>,
     /// Nếu true, phần tử children sẽ luôn được hiển thị mà không có icon Chevron để thu gọn
     pub always_expand: bool,
+    /// Cho phép hiển thị setting_item này ở trạng thái có thể tương tác hay không.
+    pub enabled: bool,
 }
 
 /// Nhận `action_element` từ ngoài vào để tránh việc phải clone toàn bộ `SettingItemProps`
@@ -91,6 +93,7 @@ fn render_inner_layout(
     .columns([icon_col_width, GridLength::Star(1.0), GridLength::Auto])
     .min_height(if is_child { 54.0 } else { 64.0 })
     .horizontal_alignment(HorizontalAlignment::Stretch)
+    .opacity(if props.enabled { 1.0 } else { 0.5 })
     .into()
 }
 
@@ -156,22 +159,33 @@ pub fn setting_item(props: &SettingItemProps, cx: &mut RenderCx) -> Element {
                     border(Element::Empty)
                         .height(1.0)
                         .background(ThemeRef::CardStroke)
-                        .horizontal_alignment(HorizontalAlignment::Stretch)
+                        .margin(Thickness {
+                            left: 0.0,
+                            right: 0.0,
+                            top: 0.0,
+                            bottom: 0.0,
+                        })
                         .into(),
                 );
             }
 
-            let child_action = child_prop.action.clone().unwrap_or(Element::Empty);
+            let mut effective_child = child_prop.clone();
+            effective_child.enabled = child_prop.enabled && props.enabled;
+
             children_list.push(
-                render_inner_layout(child_prop, child_action, true)
-                    .horizontal_alignment(HorizontalAlignment::Stretch)
-                    .margin(Thickness {
-                        left: 38.0,
-                        right: 38.0,
-                        top: 0.0,
-                        bottom: 0.0,
-                    })
-                    .into(),
+                render_inner_layout(
+                    &effective_child,
+                    effective_child.action.clone().unwrap_or(Element::Empty),
+                    true,
+                )
+                .horizontal_alignment(HorizontalAlignment::Stretch)
+                .margin(Thickness {
+                    left: 38.0,
+                    right: 38.0,
+                    top: 0.0,
+                    bottom: 0.0,
+                })
+                .into(),
             );
         }
 
@@ -200,7 +214,7 @@ pub fn setting_item(props: &SettingItemProps, cx: &mut RenderCx) -> Element {
         .border_brush(ThemeRef::CardStroke)
         .with_layout_animation(LayoutAnimationConfig::spring().animate_size(true));
 
-    if props.children.is_some() && !props.always_expand {
+    if props.children.is_some() && !props.always_expand && props.enabled {
         let set_expanded = set_expanded.clone();
         base.on_pointer_pressed(move |_| {
             set_expanded.call(!is_expanded);

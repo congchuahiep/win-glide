@@ -44,12 +44,7 @@ pub fn settings_app(cx: &mut RenderCx) -> Element {
 
 /// Khối Header hiển thị Tiêu đề và Mô tả chính của App.
 fn header() -> Element {
-    vstack((
-        title("Taskbar Switcher"),
-        body("Settings configuration for your taskbar switcher application."),
-    ))
-    .spacing(12.0)
-    .into()
+    vstack((title("Settings"),)).spacing(12.0).into()
 }
 
 /// Phân vùng chứa các cài đặt liên quan đến Taskbar.
@@ -90,7 +85,7 @@ fn taskbar_settings(cx: &mut RenderCx) -> Element {
                         })
                         .into(),
                 ),
-                children: None, always_expand: false,
+                children: None, always_expand: false, enabled: true,
             },
             cx,
         ),
@@ -121,14 +116,14 @@ fn taskbar_settings(cx: &mut RenderCx) -> Element {
                         })
                         .into(),
                 ),
-                always_expand: true,
+                always_expand: true, enabled: true,
                 children: Some(vec![
                     SettingItemProps {
                         icon: None,
                         title: None,
                         description: Some("By default, 'Cycle taskbar buttons' automatically uncombines buttons because it handles button groups poorly".into()),
                         action: None,
-                        children: None, always_expand: false,
+                        children: None, always_expand: false, enabled: config.cycle_taskbar_based,
                     },
                     SettingItemProps {
                         icon: None,
@@ -136,6 +131,7 @@ fn taskbar_settings(cx: &mut RenderCx) -> Element {
                         description: None,
                         action: Some(hotkey_button::render_hotkey_button(
                             (config.hotkey_left_modifiers, config.hotkey_left_vk),
+                            config.cycle_taskbar_based,
                             {
                                 let set_config = set_config.clone();
                                 let config_state = config.clone();
@@ -160,7 +156,7 @@ fn taskbar_settings(cx: &mut RenderCx) -> Element {
                             },
                             cx,
                         )),
-                        children: None, always_expand: false,
+                        children: None, always_expand: false, enabled: config.cycle_taskbar_based,
                     },
                     SettingItemProps {
                         icon: None,
@@ -168,6 +164,7 @@ fn taskbar_settings(cx: &mut RenderCx) -> Element {
                         description: None,
                         action: Some(hotkey_button::render_hotkey_button(
                             (config.hotkey_right_modifiers, config.hotkey_right_vk),
+                            config.cycle_taskbar_based,
                             {
                                 let set_config = set_config.clone();
                                 let config_state = config.clone();
@@ -192,7 +189,7 @@ fn taskbar_settings(cx: &mut RenderCx) -> Element {
                             },
                             cx,
                         )),
-                        children: None, always_expand: false,
+                        children: None, always_expand: false, enabled: config.cycle_taskbar_based,
                     },
                 ]),
             },
@@ -288,6 +285,7 @@ fn virtual_desktop_settings(cx: &mut RenderCx) -> Element {
                 ),
                 children: None,
                 always_expand: false,
+                enabled: true,
             },
             cx,
         ),
@@ -299,6 +297,7 @@ fn virtual_desktop_settings(cx: &mut RenderCx) -> Element {
                 action: Some(jump_modifiers_action.into()),
                 children: None,
                 always_expand: false,
+                enabled: true,
             },
             cx,
         ),
@@ -324,7 +323,7 @@ fn footer() -> Element {
     vstack((
         body_strong("About"),
         body("Version: 0.0.1"),
-        body("Developer: congchuahiep"),
+        body("Author: @congchuahiep"),
         button("GitHub Repository").on_click(|| {
             // Open browser
         }),
@@ -338,7 +337,7 @@ pub fn run() -> Result<()> {
     let _bootstrap_handle = bootstrap::initialize()?;
 
     App::new()
-        .title("Better Windows navigate's settings")
+        .title("Better windows navigate")
         .backdrop(Backdrop::Mica)
         .inner_size(500., 720.)
         .inner_constraints(InnerConstraints {

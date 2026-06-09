@@ -27,6 +27,7 @@ thread_local! {
 /// - `hotkey`: `(modifiers, virtual key code)`
 pub fn render_hotkey_button(
     hotkey: (u32, u32),
+    enabled: bool,
     on_capture: impl Fn(u32, u32) + 'static,
     cx: &mut RenderCx,
 ) -> Element {
@@ -34,10 +35,11 @@ pub fn render_hotkey_button(
     let on_capture = std::rc::Rc::new(on_capture);
 
     if is_listening {
-        button("Listening... (Press Esc to cancel)").accent().into()
+        button("Listening... (Press Esc to cancel)").accent().enabled(enabled).into()
     } else {
         button(format_hotkey(hotkey.0, hotkey.1))
             .accent()
+            .enabled(enabled)
             .on_click(move || {
                 set_listening.call(true);
                 let set_listening_clone = set_listening.clone();
