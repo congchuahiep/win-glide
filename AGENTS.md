@@ -77,7 +77,7 @@ Button-to-window matching tries 4 strategies in order:
 
 ### Dependencies
 
-- `windows` 0.61 (not 0.58). Uses features from `Win32_UI_Accessibility`, `Win32_UI_Shell_PropertiesSystem`, etc.
+- `windows` 0.61. Uses features from `Win32_UI_Accessibility`, `Win32_UI_Shell_PropertiesSystem`, etc.
 - No clap, no serde - minimal dependency set.
 
 ### Windows 11 only
