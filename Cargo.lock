@@ -39,6 +39,7 @@ dependencies = [
  "aquamarine",
  "dirs",
  "nu-ansi-term",
+ "once_cell",
  "serde",
  "serde_json",
  "tracing",

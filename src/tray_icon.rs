@@ -14,11 +14,9 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 const ICON_BYTES: &[u8] = include_bytes!("../assets/icon.ico");
 
 pub const IDM_EXIT: u32 = 1;
-pub const IDM_UNCOMBINE_MODE: u32 = 2;
 pub const IDM_SHOW_CONSOLE: u32 = 3;
 pub const IDM_SETTINGS: u32 = 4;
 
-const TEXT_UNCOMBINE_MODE: PCWSTR = w!("Uncombine Mode");
 const TEXT_SHOW_CONSOLE: PCWSTR = w!("Debug Console");
 const TEXT_SETTINGS: PCWSTR = w!("Settings...");
 const TEXT_EXIT: PCWSTR = w!("Exit");
@@ -67,7 +65,7 @@ impl TrayIcon {
     /// Hàm này **bắt buộc phải được gọi từ luồng WndProc** (cùng luồng STA quản lý cửa sổ ẩn nhận
     /// tin nhắn). Nguyên nhân là do API `TrackPopupMenu` cần xử lý các tin nhắn `WM_COMMAND` một
     /// cách đồng bộ.
-    pub fn show(&self, uncombine_enabled: bool, console_visible: bool) -> anyhow::Result<()> {
+    pub fn show(&self, console_visible: bool) -> anyhow::Result<()> {
         let hwnd = self.data.hWnd;
         let mut cursor = POINT::default();
         unsafe {
@@ -75,7 +73,7 @@ impl TrayIcon {
             // (bắt buộc theo tài liệu Win32).
             let _ = SetForegroundWindow(hwnd);
             GetCursorPos(&mut cursor)?;
-            let hmenu = Self::create_menu(uncombine_enabled, console_visible)?;
+            let hmenu = Self::create_menu(console_visible)?;
             let _ = TrackPopupMenu(
                 hmenu,
                 TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_RIGHTBUTTON,
@@ -137,25 +135,13 @@ impl TrayIcon {
     /// Tạo một menu Popup chứa các tùy chọn cấu hình của ứng dụng.
     ///
     /// Menu bao gồm:
-    /// - Tùy chọn "Uncombine Mode" (sử dụng checkbox tích chọn tùy vào giá trị của
-    /// `uncombine_enabled`)
+    /// - Tùy chọn "Debug Console"
+    /// - Tùy chọn "Settings..."
     /// - Đường phân cách (Separator)
     /// - Tùy chọn "Exit" để đóng ứng dụng
-    fn create_menu(uncombine_enabled: bool, console_visible: bool) -> anyhow::Result<HMENU> {
+    fn create_menu(console_visible: bool) -> anyhow::Result<HMENU> {
         unsafe {
             let hmenu = CreatePopupMenu()?;
-            let combine_flags = MF_STRING
-                | if uncombine_enabled {
-                    MF_CHECKED
-                } else {
-                    MF_UNCHECKED
-                };
-            AppendMenuW(
-                hmenu,
-                combine_flags,
-                IDM_UNCOMBINE_MODE as usize,
-                TEXT_UNCOMBINE_MODE,
-            )?;
 
             let console_flags = MF_STRING
                 | if crate::logging::console::DEBUG_CLI_MODE

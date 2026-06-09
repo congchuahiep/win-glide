@@ -55,7 +55,6 @@ pub fn settings_app(cx: &mut RenderCx) -> Element {
         taskbar_settings(cx),
         virtual_desktop_settings(cx),
         system_settings(cx),
-        logging(),
         footer(),
     ))
     .spacing(32.0)
@@ -391,18 +390,6 @@ fn system_settings(cx: &mut RenderCx) -> Element {
     .into()
 }
 
-/// Khối hiển thị thông tin Debug Logging.
-fn logging() -> Element {
-    vstack((
-        body_strong("Logging"),
-        button("Show Debug Console").on_click(|| {
-            crate::logging::console::toggle();
-        }),
-    ))
-    .spacing(8.0)
-    .into()
-}
-
 /// Khối Footer hiển thị thông tin tác giả và Repository.
 fn footer() -> Element {
     vstack((
@@ -453,15 +440,16 @@ pub fn show_ui() {
     use std::os::windows::io::AsRawHandle;
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject,
-        JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
         JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
 
     static UI_JOB: std::sync::OnceLock<isize> = std::sync::OnceLock::new();
 
     let job_handle = UI_JOB.get_or_init(|| unsafe {
-        let job = CreateJobObjectW(None, windows::core::PCWSTR::null()).unwrap_or(HANDLE::default());
+        let job =
+            CreateJobObjectW(None, windows::core::PCWSTR::null()).unwrap_or(HANDLE::default());
         if !job.is_invalid() {
             let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
             info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;

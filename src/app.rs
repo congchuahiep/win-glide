@@ -24,7 +24,7 @@ use crate::indicator::IndicatorWindow;
 use crate::logging::console::{self, CONSOLE_VISIBLE};
 use crate::setting;
 use crate::taskbar::{CycleDirection, TaskbarEnumerator, UncombineManager};
-use crate::tray_icon::{TrayIcon, IDM_EXIT, IDM_SETTINGS, IDM_SHOW_CONSOLE, IDM_UNCOMBINE_MODE};
+use crate::tray_icon::{TrayIcon, IDM_EXIT, IDM_SETTINGS, IDM_SHOW_CONSOLE};
 
 /// Định danh thông điệp Windows động "TaskbarCreated".
 /// Thông điệp này được gửi khi tiến trình Explorer khởi động lại.
@@ -232,7 +232,6 @@ impl App {
                 // Hiển thị menu ngữ cảnh tại vị trí con trỏ chuột
                 if mouse_event == WM_LBUTTONUP || mouse_event == WM_RBUTTONUP {
                     if let Err(e) = self.tray_icon.show(
-                        self.uncombine_enabled.load(Ordering::SeqCst),
                         CONSOLE_VISIBLE.load(Ordering::SeqCst),
                     ) {
                         error!("show_context_menu: {e}");
@@ -259,19 +258,6 @@ impl App {
                         self.running.store(false, Ordering::SeqCst);
                         unsafe {
                             PostQuitMessage(0);
-                        }
-                    }
-                    IDM_UNCOMBINE_MODE => {
-                        let was = self.uncombine_enabled.load(Ordering::SeqCst);
-                        self.uncombine_enabled.store(!was, Ordering::SeqCst);
-                        let new = !was;
-                        info!(
-                            "Uncombine mode: {}",
-                            if new { "enabled" } else { "disabled" }
-                        );
-                        match new {
-                            true => self.uncombine_manager.uncombine_all(),
-                            false => self.uncombine_manager.restore_all(),
                         }
                     }
                     IDM_SHOW_CONSOLE => {
