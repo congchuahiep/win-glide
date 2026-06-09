@@ -24,7 +24,9 @@ use tracing::{debug, error, instrument};
 use windows::core::HSTRING;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
-use windows::Win32::System::Com::StructuredStorage::InitPropVariantFromStringAsVector;
+use windows::Win32::System::Com::StructuredStorage::{
+    InitPropVariantFromStringAsVector, PROPVARIANT,
+};
 use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
 
 use super::window::{find_visible_windows, get_app_user_model_id};
@@ -66,19 +68,41 @@ impl UncombineManager {
 
     /// Uncombine **tất cả** cửa sổ đang visible trên desktop.
     ///
-    /// Duyệt `find_visible_windows()`, skip window đã track, gán AUMID mới `TaskbarSwitcher_<HWND>`
-    /// cho từng cửa sổ.
+    /// Chỉ uncombine khi phát hiện có từ 2 cửa sổ trở lên thuộc cùng một app (cùng AUMID hoặc tên tiến trình).
+    /// Cửa sổ đầu tiên (anchor) sẽ giữ nguyên AUMID để không bị mất icon.
     #[instrument(level = "debug", skip_all)]
     pub fn uncombine_all(&self) {
         let windows = find_visible_windows();
         let mut map = self.original_aumids.lock().unwrap();
 
-        debug!("uncombine_all: found {:?} windows", windows);
+        let mut group_counts = HashMap::new();
+        let mut window_keys = Vec::new();
 
         for w in &windows {
+            let key = match get_app_user_model_id(w.hwnd) {
+                Some(aumid) => format!("AUMID:{}", aumid),
+                None => format!("EXE:{}", w.process_name),
+            };
+            *group_counts.entry(key.clone()).or_insert(0) += 1;
+            window_keys.push((key, w));
+        }
+
+        let mut spared_groups = std::collections::HashSet::new();
+
+        for (key, w) in window_keys {
             let hwnd_val = w.hwnd.0 as isize;
 
             if map.contains_key(&hwnd_val) {
+                continue;
+            }
+
+            let count = group_counts.get(&key).unwrap_or(&1);
+            if *count <= 1 {
+                continue;
+            }
+
+            if !spared_groups.contains(&key) {
+                spared_groups.insert(key);
                 continue;
             }
 
@@ -86,7 +110,7 @@ impl UncombineManager {
             let new_aumid = format!("TaskbarSwitcher_{}", hwnd_val);
             map.insert(hwnd_val, original.clone());
 
-            match set_aumid(w.hwnd, &new_aumid) {
+            match set_aumid(w.hwnd, Some(&new_aumid)) {
                 Ok(()) => debug!(
                     "'{}' has been uncombined '{}' to '{}'",
                     truncate(&w.title, 30),
@@ -104,18 +128,52 @@ impl UncombineManager {
 
     /// Uncombine **một** cửa sổ mới xuất hiện.
     ///
-    /// Được gọi từ WinEvent callback (qua WM_APP_UNCOMBINE message). Nếu cửa sổ đã được track ->
-    /// bỏ qua.
+    /// Chỉ uncombine nếu đã có một cửa sổ khác của cùng app đang hiển thị (anchor window).
     #[instrument(level = "debug", skip_all)]
     pub fn uncombine_one(&self, hwnd: HWND, on_success: impl FnOnce()) {
         let hwnd_val = hwnd.0 as isize;
         let mut map = self.original_aumids.lock().unwrap();
 
+        if map.contains_key(&hwnd_val) {
+            return;
+        }
+
+        let windows = find_visible_windows();
+        let target_w = windows.iter().find(|w| w.hwnd == hwnd);
+        if target_w.is_none() {
+            return;
+        }
+        let target_w = target_w.unwrap();
+
+        let target_key = match get_app_user_model_id(hwnd) {
+            Some(aumid) => format!("AUMID:{}", aumid),
+            None => format!("EXE:{}", target_w.process_name),
+        };
+
+        let mut count = 0;
+        for w in &windows {
+            let key = match get_app_user_model_id(w.hwnd) {
+                Some(aumid) => format!("AUMID:{}", aumid),
+                None => format!("EXE:{}", w.process_name),
+            };
+            if key == target_key {
+                count += 1;
+            }
+        }
+
+        if count <= 1 {
+            debug!(
+                "uncombine_one: Spared {:?} (key: {}), count is {}",
+                hwnd, target_key, count
+            );
+            return;
+        }
+
         let original = get_app_user_model_id(hwnd);
         let new_aumid = format!("TaskbarSwitcher_{}", hwnd_val);
         map.insert(hwnd_val, original.clone());
 
-        match set_aumid(hwnd, &new_aumid) {
+        match set_aumid(hwnd, Some(&new_aumid)) {
             Ok(()) => {
                 debug!(
                     "New window {:?} has been uncombined '{}' to '{}'",
@@ -133,7 +191,7 @@ impl UncombineManager {
     ///
     /// Duyệt toàn bộ map, với mỗi cửa sổ:
     /// - Nếu có AUMID gốc: set lại AUMID gốc
-    /// - Nếu `None` (vốn không có AUMID): bỏ qua
+    /// - Nếu `None` (vốn không có AUMID): xóa AUMID property (gán VT_EMPTY)
     #[instrument(level = "debug", skip_all)]
     pub fn restore_all(&self) {
         debug!("Restoring original AppUserModelIDs");
@@ -143,10 +201,8 @@ impl UncombineManager {
         for (&hwnd_val, original) in map.iter() {
             let hwnd = HWND(hwnd_val as *mut _);
 
-            if let Some(aumid) = original {
-                debug!("Restoring {:?}: '{}'", hwnd, aumid);
-                let _ = set_aumid(hwnd, aumid);
-            }
+            debug!("Restoring {:?}: '{:?}'", hwnd, original);
+            let _ = set_aumid(hwnd, original.as_deref());
         }
 
         map.clear();
@@ -160,10 +216,13 @@ impl Drop for UncombineManager {
 }
 
 /// Set AppUserModelID cho một cửa sổ.
-fn set_aumid(hwnd: HWND, aumid: &str) -> Result<(), windows::core::Error> {
+fn set_aumid(hwnd: HWND, aumid: Option<&str>) -> Result<(), windows::core::Error> {
     unsafe {
         let store: IPropertyStore = SHGetPropertyStoreForWindow(hwnd)?;
-        let prop = InitPropVariantFromStringAsVector(&HSTRING::from(aumid))?;
+        let prop = match aumid {
+            Some(s) => InitPropVariantFromStringAsVector(&HSTRING::from(s))?,
+            None => PROPVARIANT::default(),
+        };
         store.SetValue(&PKEY_AppUserModel_ID, &prop)
     }
 }
