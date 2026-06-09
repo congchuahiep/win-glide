@@ -1,5 +1,5 @@
-//! Chứa định nghĩa component `setting_item` - một block cài đặt có khả năng mở rộng (Expander) hoặc đứng độc lập.
-//! Hỗ trợ animation khi mở rộng và căn chỉnh tự động với icon.
+//! Chứa định nghĩa component `setting_item`, một block cài đặt có khả năng mở rộng (Expander) hoặc
+//! đứng độc lập.
 
 use windows_reactor::*;
 
@@ -24,7 +24,11 @@ pub struct SettingItemProps {
 }
 
 /// Nhận `action_element` từ ngoài vào để tránh việc phải clone toàn bộ `SettingItemProps`
-fn render_inner_layout(props: &SettingItemProps, action_element: Element) -> Element {
+fn render_inner_layout(
+    props: &SettingItemProps,
+    action_element: Element,
+    is_child: bool,
+) -> Element {
     let description_el = props.description.as_ref().map_or(Element::Empty, |desc| {
         caption(desc.clone())
             .font_size(12.0)
@@ -70,7 +74,7 @@ fn render_inner_layout(props: &SettingItemProps, action_element: Element) -> Ele
             .grid_column(2),
     ))
     .columns([icon_col_width, GridLength::Star(1.0), GridLength::Auto])
-    .min_height(64.0)
+    .min_height(if is_child { 54.0 } else { 64.0 })
     .horizontal_alignment(HorizontalAlignment::Stretch)
     .into()
 }
@@ -121,7 +125,10 @@ pub fn setting_item(props: &SettingItemProps, cx: &mut RenderCx) -> Element {
             .into(),
     };
 
-    let header_layout = render_inner_layout(props, final_action);
+    let header_layout = border(render_inner_layout(props, final_action, false))
+        .background(ThemeRef::CardBackground)
+        .horizontal_alignment(HorizontalAlignment::Stretch)
+        .into();
     let mut card_elements = vec![header_layout];
 
     if let Some(children) = &props.children {
@@ -146,7 +153,7 @@ pub fn setting_item(props: &SettingItemProps, cx: &mut RenderCx) -> Element {
 
             let child_action = child_prop.action.clone().unwrap_or(Element::Empty);
             children_list.push(
-                render_inner_layout(child_prop, child_action)
+                render_inner_layout(child_prop, child_action, true)
                     .horizontal_alignment(HorizontalAlignment::Stretch)
                     .margin(Thickness {
                         left: 38.0,
@@ -160,6 +167,7 @@ pub fn setting_item(props: &SettingItemProps, cx: &mut RenderCx) -> Element {
 
         let inner_border =
             border(vstack(children_list).horizontal_alignment(HorizontalAlignment::Stretch))
+                .background(ThemeRef::LayerFill)
                 .horizontal_alignment(HorizontalAlignment::Stretch);
 
         let children_container = scroll_viewer(inner_border)
@@ -179,7 +187,6 @@ pub fn setting_item(props: &SettingItemProps, cx: &mut RenderCx) -> Element {
     border(vstack(card_elements).horizontal_alignment(HorizontalAlignment::Stretch))
         .corner_radius(4.0)
         .border_thickness(Thickness::from(1.0))
-        .background(ThemeRef::CardBackground)
         .border_brush(ThemeRef::CardStroke)
         .with_layout_animation(LayoutAnimationConfig::spring().animate_size(true))
         .into()

@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod app;
+mod config;
 mod event;
 mod hotkey;
 mod indicator;
@@ -108,7 +109,8 @@ fn main() -> anyhow::Result<()> {
     }
 
     let main_thread_id = unsafe { GetCurrentThreadId() };
-    let mut app = app::App::new(args.combine_enabled)?;
+    let config = crate::config::AppConfig::load();
+    let mut app = app::App::new(&config)?;
 
     unsafe {
         app.run(main_thread_id)?;

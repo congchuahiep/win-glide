@@ -7,16 +7,16 @@
 //! - **Alt + ]**: Di chuyển tiêu điểm sang nút Taskbar bên phải ([`HotkeyAction::Right`])
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT, VK_OEM_4, VK_OEM_6,
+    RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT,
 };
 
 /// Các hành động có thể kích hoạt bởi phím nóng toàn cục
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum HotkeyAction {
     /// Di chuyển tiêu điểm sang cửa sổ bên trái trên Taskbar.
-    Left,
+    CycleLeft,
     /// Di chuyển tiêu điểm sang cửa sổ bên phải trên Taskbar.
-    Right,
+    CycleRight,
     /// Chuyển đổi sang Virtual Desktop với index (0-based) chỉ định.
     SwitchVirtualDesktop(u32),
 }
@@ -69,19 +69,19 @@ impl HotkeyManager {
     /// # Errors
     /// Trả về lỗi nếu không thể đăng ký một hoặc nhiều phím nóng (thường do xung đột phím nóng với
     /// phần mềm khác).
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new(config: &crate::config::AppConfig) -> anyhow::Result<Self> {
         let mut hotkeys = vec![
             Hotkey {
                 id: 1,
-                action: HotkeyAction::Left,
-                modifiers: MOD_ALT,
-                vk: VK_OEM_4.0 as u32,
+                action: HotkeyAction::CycleLeft,
+                modifiers: HOT_KEY_MODIFIERS(config.hotkey_left_modifiers),
+                vk: config.hotkey_left_vk,
             },
             Hotkey {
                 id: 2,
-                action: HotkeyAction::Right,
-                modifiers: MOD_ALT,
-                vk: VK_OEM_6.0 as u32,
+                action: HotkeyAction::CycleRight,
+                modifiers: HOT_KEY_MODIFIERS(config.hotkey_right_modifiers),
+                vk: config.hotkey_right_vk,
             },
         ];
 
@@ -121,11 +121,53 @@ impl HotkeyManager {
     }
 
     /// Tìm kiếm hành động tương ứng với ID phím nóng nhận được từ tin nhắn hệ thống
-    /// [`windows::Win32::UI::WindowsAndMessaging::WM_HOTKEY`]
-    ///
-    /// Trả về `Some(HotkeyAction)` nếu khớp ID, ngược lại trả về `None`.
     pub fn action_from_id(&self, id: i32) -> Option<HotkeyAction> {
         self.hotkeys.iter().find(|h| h.id == id).map(|h| h.action)
+    }
+
+    /// Tải lại cấu hình phím tắt: gỡ phím tắt cũ, nạp mới và đăng ký lại
+    pub fn reload(&mut self, config: &crate::config::AppConfig) -> anyhow::Result<()> {
+        for hotkey in &self.hotkeys {
+            hotkey.unregister();
+        }
+
+        self.hotkeys.clear();
+
+        self.hotkeys.push(Hotkey {
+            id: 1,
+            action: HotkeyAction::CycleLeft,
+            modifiers: HOT_KEY_MODIFIERS(config.hotkey_left_modifiers),
+            vk: config.hotkey_left_vk,
+        });
+
+        self.hotkeys.push(Hotkey {
+            id: 2,
+            action: HotkeyAction::CycleRight,
+            modifiers: HOT_KEY_MODIFIERS(config.hotkey_right_modifiers),
+            vk: config.hotkey_right_vk,
+        });
+
+        for i in 1..=9 {
+            self.hotkeys.push(Hotkey {
+                id: 10 + i as i32,
+                action: HotkeyAction::SwitchVirtualDesktop(i as u32 - 1),
+                modifiers: MOD_ALT,
+                vk: 0x30 + i as u32,
+            });
+        }
+
+        let mut errs = Vec::new();
+        for hotkey in &self.hotkeys {
+            if let Err(e) = hotkey.register() {
+                errs.push(format!("ID {}: {}", hotkey.id, e));
+            }
+        }
+
+        if !errs.is_empty() {
+            tracing::warn!("Failed to reload some hotkeys: {:?}", errs);
+        }
+
+        Ok(())
     }
 }
 

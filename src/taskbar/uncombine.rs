@@ -73,6 +73,8 @@ impl UncombineManager {
         let windows = find_visible_windows();
         let mut map = self.original_aumids.lock().unwrap();
 
+        debug!("uncombine_all: found {:?} windows", windows);
+
         for w in &windows {
             let hwnd_val = w.hwnd.0 as isize;
 
@@ -86,9 +88,10 @@ impl UncombineManager {
 
             match set_aumid(w.hwnd, &new_aumid) {
                 Ok(()) => debug!(
-                    "'{}' has been uncombined ({})",
+                    "'{}' has been uncombined '{}' to '{}'",
                     truncate(&w.title, 30),
-                    get_app_user_model_id(w.hwnd).as_deref().unwrap_or("None")
+                    original.as_deref().unwrap_or("None"),
+                    new_aumid
                 ),
                 Err(e) => error!(
                     "Failed to set AUMID for {}: {:?}",
@@ -108,17 +111,18 @@ impl UncombineManager {
         let hwnd_val = hwnd.0 as isize;
         let mut map = self.original_aumids.lock().unwrap();
 
-        if map.contains_key(&hwnd_val) {
-            return;
-        }
-
         let original = get_app_user_model_id(hwnd);
         let new_aumid = format!("TaskbarSwitcher_{}", hwnd_val);
         map.insert(hwnd_val, original.clone());
 
         match set_aumid(hwnd, &new_aumid) {
             Ok(()) => {
-                debug!("New window {:?} has been uncombined", hwnd);
+                debug!(
+                    "New window {:?} has been uncombined '{}' to '{}'",
+                    hwnd,
+                    original.as_deref().unwrap_or("None"),
+                    new_aumid
+                );
                 on_success();
             }
             Err(e) => error!("Failed to set AUMID for {:?}: {:?}", hwnd, e),
@@ -134,16 +138,18 @@ impl UncombineManager {
     pub fn restore_all(&self) {
         debug!("Restoring original AppUserModelIDs");
 
-        let map = self.original_aumids.lock().unwrap();
+        let mut map = self.original_aumids.lock().unwrap();
 
         for (&hwnd_val, original) in map.iter() {
             let hwnd = HWND(hwnd_val as *mut _);
 
             if let Some(aumid) = original {
-                debug!("  Restoring {:?} -> '{}'", hwnd, aumid);
+                debug!("Restoring {:?}: '{}'", hwnd, aumid);
                 let _ = set_aumid(hwnd, aumid);
             }
         }
+
+        map.clear();
     }
 }
 
@@ -152,8 +158,6 @@ impl Drop for UncombineManager {
         self.restore_all();
     }
 }
-
-// ── Helper functions (private) ──
 
 /// Set AppUserModelID cho một cửa sổ.
 fn set_aumid(hwnd: HWND, aumid: &str) -> Result<(), windows::core::Error> {

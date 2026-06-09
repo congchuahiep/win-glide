@@ -209,11 +209,11 @@ impl TaskbarEnumerator {
     #[instrument(level = "debug", skip_all)]
     pub fn cycle_to_neighbor(
         &self,
-        combine_enabled: bool,
+        uncombine_enabled: bool,
         direction: CycleDirection,
     ) -> anyhow::Result<()> {
         let foreground = unsafe { GetForegroundWindow() };
-        let target = self.find_neighbor_window(foreground, combine_enabled, direction)?;
+        let target = self.find_neighbor_window(foreground, uncombine_enabled, direction)?;
 
         match target {
             Some(target) => {
@@ -242,7 +242,7 @@ impl TaskbarEnumerator {
     fn find_neighbor_window(
         &self,
         source: HWND,
-        combine_enabled: bool,
+        uncombine_enabled: bool,
         direction: CycleDirection,
     ) -> anyhow::Result<Option<TargetWindow>> {
         let buttons = self.enumerate_current_monitor_buttons()?;
@@ -275,18 +275,8 @@ impl TaskbarEnumerator {
 
         let target_button = &buttons[target_index];
 
-        match combine_enabled {
+        match uncombine_enabled {
             true => {
-                let windows = button_map.find_windows_by_button(&target_button);
-                let is_grouped = windows.len() > 1;
-
-                Ok(windows.into_iter().next().map(|w| TargetWindow {
-                    name: w.title,
-                    hwnd: w.hwnd,
-                    is_grouped,
-                }))
-            }
-            false => {
                 debug!(
                     "Target button [{}]: '{}' AUMID '{:?}'",
                     target_index, target_button.name, target_button.automation_id
@@ -299,6 +289,16 @@ impl TaskbarEnumerator {
                         hwnd: w.hwnd,
                         is_grouped: false,
                     }))
+            }
+            false => {
+                let windows = button_map.find_windows_by_button(&target_button);
+                let is_grouped = windows.len() > 1;
+
+                Ok(windows.into_iter().next().map(|w| TargetWindow {
+                    name: w.title,
+                    hwnd: w.hwnd,
+                    is_grouped,
+                }))
             }
         }
     }

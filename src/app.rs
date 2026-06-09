@@ -17,13 +17,14 @@ use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+use crate::config::AppConfig;
 use crate::event::{self, InvalidateSource};
 use crate::hotkey::{HotkeyAction, HotkeyManager};
 use crate::indicator::IndicatorWindow;
 use crate::logging::console::{self, CONSOLE_VISIBLE};
 use crate::setting;
 use crate::taskbar::{CycleDirection, TaskbarEnumerator, UncombineManager};
-use crate::tray_icon::{TrayIcon, IDM_COMBINE_MODE, IDM_EXIT, IDM_SETTINGS, IDM_SHOW_CONSOLE};
+use crate::tray_icon::{TrayIcon, IDM_EXIT, IDM_SETTINGS, IDM_SHOW_CONSOLE, IDM_UNCOMBINE_MODE};
 
 /// Định danh thông điệp Windows động "TaskbarCreated".
 /// Thông điệp này được gửi khi tiến trình Explorer khởi động lại.
@@ -90,7 +91,7 @@ pub struct App {
     uncombine_manager: Box<UncombineManager>,
 
     /// Cờ xác định chế độ gộp nhóm (Combine mode) hiện tại có bật hay không.
-    combine_enabled: AtomicBool,
+    uncombine_enabled: AtomicBool,
 
     /// Cờ điều khiển việc duy trì chạy vòng lặp tin nhắn (Message Loop).
     running: Arc<AtomicBool>,
@@ -114,9 +115,9 @@ impl App {
     ///
     /// Hàm sẽ trả về lỗi nếu không thể khởi tạo [`TaskbarEnumerator`], [`HotkeyManager`],
     /// tạo cửa sổ ẩn Win32 hoặc đăng ký khay hệ thống ([`TrayIcon`]).
-    pub fn new(combine_enabled: bool) -> anyhow::Result<Self> {
+    pub fn new(config: &AppConfig) -> anyhow::Result<Self> {
         let enumerator = TaskbarEnumerator::new()?;
-        let hotkey_manager = HotkeyManager::new()?;
+        let hotkey_manager = HotkeyManager::new(config)?;
         let uncombine_manager = Box::new(UncombineManager::new());
 
         let mut tray_icon = TrayIcon::create();
@@ -128,13 +129,15 @@ impl App {
 
         tray_icon.register(hidden_window.hwnd)?;
 
+        let uncombine_enabled = AtomicBool::new(config.uncombine_mode);
+
         let indicator_window = unsafe { IndicatorWindow::new()? };
 
         Ok(Self {
             enumerator,
             hotkey_manager,
             uncombine_manager,
-            combine_enabled: AtomicBool::new(combine_enabled),
+            uncombine_enabled,
             running: Arc::new(AtomicBool::new(true)),
             tray_icon,
             hidden_window,
@@ -164,7 +167,7 @@ impl App {
         let _win_hook = event::WinEventHook::install(&self.uncombine_manager)?;
         self.enumerator.install_uia_hook(main_thread_id)?;
 
-        if !self.combine_enabled.load(Ordering::SeqCst) {
+        if self.uncombine_enabled.load(Ordering::SeqCst) {
             self.uncombine_manager.uncombine_all();
         }
 
@@ -200,11 +203,12 @@ impl App {
     /// - `WM_HOTKEY`: Xử lý khi người dùng nhấn tổ hợp phím nóng.
     /// - `WM_APP_UNCOMBINE`: Xử lý việc tách nhóm cho một cửa sổ mới.
     /// - `WM_APP_INVALIDATE_CACHE`: Xóa bộ nhớ đệm danh sách các nút Taskbar.
-    fn dispatch_thread_message(&self, msg: &MSG) {
+    fn dispatch_thread_message(&mut self, msg: &MSG) {
         match msg.message {
             WM_HOTKEY => self.handle_hotkey(msg.wParam),
             event::WM_APP_UNCOMBINE => self.handle_uncombine(msg.wParam),
             event::WM_APP_INVALIDATE_CACHE => self.handle_cache_invalidate(msg.wParam),
+            event::WM_APP_RELOAD_CONFIG => self.handle_reload_config(),
             _ => {}
         }
     }
@@ -224,7 +228,7 @@ impl App {
                 // Hiển thị menu ngữ cảnh tại vị trí con trỏ chuột
                 if mouse_event == WM_LBUTTONUP || mouse_event == WM_RBUTTONUP {
                     if let Err(e) = self.tray_icon.show(
-                        self.combine_enabled.load(Ordering::SeqCst),
+                        self.uncombine_enabled.load(Ordering::SeqCst),
                         CONSOLE_VISIBLE.load(Ordering::SeqCst),
                     ) {
                         error!("show_context_menu: {e}");
@@ -232,7 +236,10 @@ impl App {
                 }
                 Some(LRESULT(0))
             }
-
+            event::WM_APP_RELOAD_CONFIG => {
+                self.handle_reload_config();
+                Some(LRESULT(0))
+            }
             // Các lệnh Command được gửi từ Menu ngữ cảnh của Khay hệ thống
             WM_COMMAND => {
                 let id = loword(wparam.0 as u32);
@@ -244,15 +251,17 @@ impl App {
                             PostQuitMessage(0);
                         }
                     }
-                    IDM_COMBINE_MODE => {
-                        let was = self.combine_enabled.load(Ordering::SeqCst);
-                        self.combine_enabled.store(!was, Ordering::SeqCst);
+                    IDM_UNCOMBINE_MODE => {
+                        let was = self.uncombine_enabled.load(Ordering::SeqCst);
+                        self.uncombine_enabled.store(!was, Ordering::SeqCst);
                         let new = !was;
-                        info!("Combine mode: {}", if new { "enabled" } else { "disabled" });
-                        if !new {
-                            self.uncombine_manager.uncombine_all();
-                        } else {
-                            self.uncombine_manager.restore_all();
+                        info!(
+                            "Uncombine mode: {}",
+                            if new { "enabled" } else { "disabled" }
+                        );
+                        match new {
+                            true => self.uncombine_manager.uncombine_all(),
+                            false => self.uncombine_manager.restore_all(),
                         }
                     }
                     IDM_SHOW_CONSOLE => {
@@ -365,25 +374,44 @@ impl App {
 }
 
 impl App {
-    /// Xử lý sự kiện nhấn phím nóng toàn cục (Alt+[ và Alt+]).
+    fn handle_reload_config(&mut self) {
+        info!("Reloading configuration...");
+        let config = crate::config::AppConfig::load();
+
+        self.uncombine_enabled
+            .store(config.uncombine_mode, Ordering::SeqCst);
+
+        match config.uncombine_mode {
+            true => self.uncombine_manager.uncombine_all(),
+            false => self.uncombine_manager.restore_all(),
+        }
+
+        if let Err(e) = self.hotkey_manager.reload(&config) {
+            error!("Failed to reload hotkeys: {}", e);
+        }
+
+        info!("Configuration reloaded successfully.");
+    }
+
+    /// Xử lý sự kiện nhấn phím nóng toàn cục
     ///
     /// Chuyển đổi ID phím nóng thành hành động di chuyển trái/phải trên thanh Taskbar.
     /// Ngoài ra, cơ chế này tự động dọn dẹp các sự kiện WM_HOTKEY lặp lại do cơ chế
     /// auto-repeat của Windows sinh ra khi giữ phím lâu để tránh di chuyển vượt tầm kiểm soát.
     fn handle_hotkey(&self, wparam: WPARAM) {
         match self.hotkey_manager.action_from_id(wparam.0 as i32) {
-            Some(HotkeyAction::Left) => {
+            Some(HotkeyAction::CycleLeft) => {
                 match self.enumerator.cycle_to_neighbor(
-                    self.combine_enabled.load(Ordering::SeqCst),
+                    self.uncombine_enabled.load(Ordering::SeqCst),
                     CycleDirection::Backward,
                 ) {
                     Ok(_) => { /* Thành công */ }
                     Err(e) => error!("Error cycling taskbar: {e}"),
                 }
             }
-            Some(HotkeyAction::Right) => {
+            Some(HotkeyAction::CycleRight) => {
                 match self.enumerator.cycle_to_neighbor(
-                    self.combine_enabled.load(Ordering::SeqCst),
+                    self.uncombine_enabled.load(Ordering::SeqCst),
                     CycleDirection::Forward,
                 ) {
                     Ok(_) => { /* Thành công */ }
@@ -417,7 +445,7 @@ impl App {
         let hwnd = HWND(wparam.0 as *mut _);
         let _guard = debug_span!("winevent", event = "UNCOMBINE").entered();
         debug!("hwnd={:?}", hwnd);
-        if !self.combine_enabled.load(Ordering::SeqCst) {
+        if self.uncombine_enabled.load(Ordering::SeqCst) {
             self.uncombine_manager
                 .uncombine_one(hwnd, || self.enumerator.invalidate_cache());
         }

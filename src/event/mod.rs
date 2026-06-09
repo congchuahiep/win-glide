@@ -8,3 +8,4 @@ mod winevent;
 
 pub use uia::*;
 pub use winevent::*;
+pub const WM_APP_RELOAD_CONFIG: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 0x102;
