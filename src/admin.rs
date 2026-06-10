@@ -1,3 +1,8 @@
+//! Provides utilities for checking and requesting Windows Administrator privileges.
+//!
+//! This module contains functions to query the current process token for elevation status
+//! and to restart the application requesting elevated privileges via the UAC prompt.
+
 use std::env;
 use std::os::windows::ffi::OsStrExt;
 use windows::core::{w, PCWSTR};
@@ -6,6 +11,11 @@ use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVAT
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::Win32::UI::Shell::ShellExecuteW;
 
+/// Checks if the current process is running with Administrator privileges (Elevated).
+///
+/// Uses the Windows `GetTokenInformation` API to query `TokenElevation`.
+///
+/// Returns `true` if the process is elevated, `false` otherwise.
 pub fn is_running_as_admin() -> bool {
     unsafe {
         let mut token: HANDLE = HANDLE::default();
@@ -34,6 +44,18 @@ pub fn is_running_as_admin() -> bool {
     }
 }
 
+/// Restarts the application requesting Administrator privileges.
+///
+/// Uses `ShellExecuteW` with the "runas" verb to trigger the Windows UAC (User Account Control) prompt.
+/// If the user accepts, a new elevated instance of the application is spawned, and the current process exits immediately.
+///
+/// # Arguments
+///
+/// * `reopen_ui` - If `true`, passes the `--reopen-ui` flag to the new instance so that the settings UI is automatically reopened.
+///
+/// # Errors
+///
+/// Returns an error if `ShellExecuteW` fails or if the user declines the UAC prompt.
 pub fn restart_as_admin(reopen_ui: bool) -> anyhow::Result<()> {
     unsafe {
         let exe_path = env::current_exe()?;
@@ -47,7 +69,7 @@ pub fn restart_as_admin(reopen_ui: bool) -> anyhow::Result<()> {
         };
         args_u16.push(0);
 
-        // Run as admin
+        // Run as admin using the 'runas' verb which triggers the UAC prompt
         let res = ShellExecuteW(
             None,
             w!("runas"),

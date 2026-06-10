@@ -1,9 +1,9 @@
-//! UIA StructureChanged event handler, phát hiện thêm/xoá taskbar buttons.
+//! UIA StructureChanged event handler, detects the addition/removal of taskbar buttons.
 //!
 //! # Reorder detection
 //!
-//! StructureChangeType_ChildrenReordered không fire trên Win11 XAML taskbar.
-//! Reorder được xử lý bởi TTL cache (safety net trong taskbar.rs).
+//! StructureChangeType_ChildrenReordered does not fire on the Win11 XAML taskbar.
+//! Reordering is handled by the TTL cache (safety net in taskbar.rs).
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tracing::debug;
@@ -22,12 +22,12 @@ use super::winevent::InvalidateSource;
 
 pub const WM_APP_INVALIDATE_CACHE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 0x101;
 
-/// Cờ chống gửi message trùng khi nhiều UIA event fire liên tiếp.
+/// Flag to prevent sending duplicate messages when multiple UIA events fire in rapid succession.
 pub static CACHE_INVALIDATED: AtomicBool = AtomicBool::new(false);
 
 static MAIN_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
-/// COM event handler cho StructureChanged.
+/// COM event handler for StructureChanged.
 #[windows_core::implement(IUIAutomationStructureChangedEventHandler)]
 struct StructureChangedHandler {}
 
@@ -68,9 +68,9 @@ impl IUIAutomationStructureChangedEventHandler_Impl for StructureChangedHandler_
     }
 }
 
-/// UIA event hook RAII - install khi tạo, auto-uninstall khi Drop.
+/// UIA event hook RAII - installs on creation, auto-uninstalls on Drop.
 ///
-/// Handler COM object được leak (Box::leak) để giữ alive suốt app lifetime.
+/// The handler COM object is leaked (Box::leak) to keep it alive throughout the app lifetime.
 pub struct UiaEventHook {
     automation: IUIAutomation,
     taskbar_element: IUIAutomationElement,
@@ -78,10 +78,10 @@ pub struct UiaEventHook {
 }
 
 impl UiaEventHook {
-    /// Đăng ký StructureChanged event handler trên taskbar element.
+    /// Registers the StructureChanged event handler on the taskbar element.
     ///
     /// # Safety
-    /// Phải gọi trên main thread (STA).
+    /// Must be called on the main thread (STA).
     pub unsafe fn install(
         automation: &IUIAutomation,
         taskbar_hwnd: HWND,
@@ -127,7 +127,7 @@ impl Drop for UiaEventHook {
     }
 }
 
-/// Reset cờ "cache invalidated" sau khi main thread đã xử lý.
+/// Resets the "cache invalidated" flag after the main thread has processed it.
 pub fn reset_cache_invalidated_flag() {
     CACHE_INVALIDATED.store(false, Ordering::SeqCst);
 }

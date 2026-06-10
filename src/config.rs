@@ -1,3 +1,8 @@
+//! Handles the reading and writing of user preferences.
+//!
+//! This module defines the `AppConfig` struct and provides serialization/deserialization
+//! capabilities to persist the application's settings to a JSON file in the user's AppData directory.
+
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;

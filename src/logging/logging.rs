@@ -36,7 +36,7 @@ pub fn setup_logger(verbose: bool) -> WorkerGuard {
     file_guard
 }
 
-/// Trích xuất tên module từ event metadata.
+/// Extracts the module name from the event metadata.
 fn module_tag(event: &tracing::Event) -> Option<Tag> {
     let target: &'static str = event.metadata().target();
     let short: &'static str = target.rsplit("::").next().unwrap_or(target);

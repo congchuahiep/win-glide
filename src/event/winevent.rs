@@ -1,4 +1,4 @@
-//! WinEvent hook - theo dõi EVENT_OBJECT_SHOW để uncombine cửa sổ mới.
+//! WinEvent hook - monitors EVENT_OBJECT_SHOW to uncombine new windows.
 
 use std::fmt::{self, Display};
 use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
@@ -19,16 +19,16 @@ pub const WM_APP_UNCOMBINE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_US
 static MAIN_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 static UNCOMBINE: AtomicPtr<UncombineManager> = AtomicPtr::new(std::ptr::null_mut());
 
-/// WinEvent hook RAII - install khi tạo, auto-uninstall khi Drop.
+/// WinEvent hook RAII - installs on creation, auto-uninstalls on Drop.
 pub struct WinEventHook {
     hook_handle: HWINEVENTHOOK,
 }
 
 impl WinEventHook {
-    /// Cài đặt WinEvent hook cho EVENT_OBJECT_SHOW.
+    /// Installs the WinEvent hook for EVENT_OBJECT_SHOW.
     ///
     /// # Safety
-    /// Phải gọi trên main thread (STA).
+    /// Must be called on the main thread (STA).
     pub unsafe fn install(uncombine: &UncombineManager) -> anyhow::Result<Self> {
         MAIN_THREAD_ID.store(GetCurrentThreadId(), Ordering::SeqCst);
         UNCOMBINE.store(uncombine as *const _ as *mut _, Ordering::SeqCst);
@@ -68,7 +68,7 @@ impl Drop for WinEventHook {
     }
 }
 
-/// Callback WinEvent - chỉ xử lý EVENT_OBJECT_SHOW cho uncombine.
+/// WinEvent callback - only processes EVENT_OBJECT_SHOW for uncombining.
 unsafe extern "system" fn win_event_proc(
     _hook: HWINEVENTHOOK,
     event: u32,
@@ -131,7 +131,7 @@ unsafe extern "system" fn win_event_proc(
     );
 }
 
-/// Loại sự kiện gây ra cache invalidation (truyền qua WPARAM).
+/// The type of event that caused the cache invalidation (passed via WPARAM).
 #[repr(usize)]
 #[derive(Debug, Clone, Copy)]
 pub enum InvalidateSource {
@@ -158,7 +158,7 @@ impl Display for InvalidateSource {
 }
 
 impl InvalidateSource {
-    /// Chuyển từ WPARAM `usize` về enum (không transmute).
+    /// Converts from WPARAM `usize` to the enum (without transmute).
     pub fn from_wparam(wparam: usize) -> Self {
         match wparam {
             0 => Self::ButtonAdded,

@@ -153,7 +153,7 @@ impl std::fmt::Display for ColorLevel {
             Level::TRACE => Color::Purple,
             Level::DEBUG => Color::Blue,
             Level::INFO => Color::Green,
-            Level::WARN => Color::Rgb(252, 234, 160), // cam nhạt
+            Level::WARN => Color::Rgb(252, 234, 160), // light orange
             Level::ERROR => Color::Red,
         };
         let style = color.bold();
@@ -162,13 +162,13 @@ impl std::fmt::Display for ColorLevel {
 }
 
 // ---------------------------------------------------------------------------
-// MakeWriter implementation cho tracing-forest
+// MakeWriter implementation for tracing-forest
 // ---------------------------------------------------------------------------
 
-/// Writer ghi log vào stdin pipe của tiến trình PowerShell con.
+/// Writer that logs to the stdin pipe of the child console process.
 ///
-/// Nếu pipe không tồn tại (console chưa bật hoặc đã bị tắt), dữ liệu được
-/// bỏ qua một cách im lặng mà không gây panic hay block ứng dụng chính.
+/// If the pipe does not exist (console not toggled or already closed), the data is
+/// silently discarded without causing a panic or blocking the main application.
 pub struct ConsoleWriter;
 
 impl<'a> MakeWriter<'a> for ConsoleWriter {
@@ -179,16 +179,16 @@ impl<'a> MakeWriter<'a> for ConsoleWriter {
     }
 }
 
-/// Writer thực thi ghi dữ liệu vào stdin pipe.
+/// Writer that executes data writing to the stdin pipe.
 ///
-/// **Quy tắc quan trọng**: Hàm `write()` **KHÔNG BAO GIỜ** trả về `Err`.
+/// **Crucial rule**: The `write()` function must **NEVER** return an `Err`.
 ///
-/// Lý do: `tracing-forest` sử dụng `.expect()` trên kết quả của `Processor::process()`.
-/// Nếu `write()` trả về lỗi (ví dụ: `BrokenPipe` khi console bị tắt), nó sẽ
-/// lan truyền lên `Printer::process()` -> `ForestLayer::on_event()` -> `.expect()` -> **panic**.
+/// Reason: `tracing-forest` uses `.expect()` on the result of `Processor::process()`.
+/// If `write()` returns an error (e.g., `BrokenPipe` when the console is closed), it will
+/// propagate to `Printer::process()` -> `ForestLayer::on_event()` -> `.expect()` -> **panic**.
 ///
-/// Khi phát hiện pipe bị broken, writer tự động dọn dẹp pipe (set `None`) và
-/// cập nhật `CONSOLE_VISIBLE = false`, sau đó trả về `Ok(buf.len())` để nuốt dữ liệu.
+/// When a broken pipe is detected, the writer automatically cleans up the pipe (sets to `None`) and
+/// updates `CONSOLE_VISIBLE = false`, then returns `Ok(buf.len())` to swallow the data.
 pub struct PipeWriter;
 
 impl std::io::Write for PipeWriter {
@@ -202,14 +202,14 @@ impl std::io::Write for PipeWriter {
                 match pipe.write(buf) {
                     Ok(n) => return Ok(n),
                     Err(_) => {
-                        // Pipe broken (console bị tắt) -> dọn dẹp
+                        // Pipe broken (console closed) -> clean up
                         *guard = None;
                         CONSOLE_VISIBLE.store(false, Ordering::SeqCst);
                     }
                 }
             }
         }
-        // Pipe không tồn tại hoặc bị broken -> nuốt dữ liệu
+        // Pipe does not exist or is broken -> swallow the data
         Ok(buf.len())
     }
 

@@ -1,6 +1,6 @@
 use windows::core::w;
 
-/// Cắt chuỗi `s` thành `max_len` ký tự, thêm `...` nếu chuỗi dài hơn.
+/// Truncates string `s` to `max_len` characters, appending `...` if it is longer.
 pub fn truncate(s: &str, max_len: usize) -> String {
     match s.char_indices().nth(max_len) {
         Some((idx, _)) => format!("{}...", &s[..idx]),
@@ -8,12 +8,12 @@ pub fn truncate(s: &str, max_len: usize) -> String {
     }
 }
 
-/// Strip suffix " - N running window(s)" khỏi tên taskbar button.
+/// Strips the suffix " - N running window(s)" from the taskbar button name.
 ///
-/// Format trên Win11:
-/// - App đơn: `"Notepad"` -> `"Notepad"`
-/// - Nhiều windows: `"Chrome - 3 running windows"` -> `"Chrome"`
-/// - Pinned: `"Notepad - Pinned"` -> `"Notepad - Pinned"` (không đổi)
+/// Format on Win11:
+/// - Single app: `"Notepad"` -> `"Notepad"`
+/// - Multiple windows: `"Chrome - 3 running windows"` -> `"Chrome"`
+/// - Pinned: `"Notepad - Pinned"` -> `"Notepad - Pinned"` (unchanged)
 /// - VS Code: `"VS Code - main.rs - 1 running window"` -> `"VS Code - main.rs"`
 pub fn clean_button_name(name: &str) -> String {
     if let Some(pos) = name.rfind(" running window") {
@@ -33,7 +33,7 @@ pub fn clean_button_name(name: &str) -> String {
     name.to_string()
 }
 
-/// Kiểm tra xem một class name có phải là class hệ thống hay không.
+/// Checks whether a given class name is a system class.
 pub fn is_system_class(class_name: &str) -> bool {
     matches!(
         class_name,
@@ -48,7 +48,7 @@ pub fn is_system_class(class_name: &str) -> bool {
     )
 }
 
-/// Kiểm tra xem hệ thống đang sử dụng theme light hay dark.
+/// Checks whether the system is using a light or dark theme.
 pub fn is_light_theme() -> bool {
     let mut value: u32 = 0;
     let mut size = std::mem::size_of::<u32>() as u32;

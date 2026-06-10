@@ -1,48 +1,48 @@
-//! Quản lý phím nóng toàn cục (Global Hotkeys) bằng API Win32.
+//! Global hotkeys management using the Win32 API.
 //!
-//! Module chịu trách nhiệm đăng ký, hủy đăng ký và ánh xạ các phím nóng toàn cục.
+//! This module is responsible for registering, unregistering, and mapping global hotkeys.
 //!
-//! Mặc định, ứng dụng đăng ký hai phím nóng:
-//! - **Alt + [**: Di chuyển tiêu điểm sang nút Taskbar bên trái ([`HotkeyAction::Left`])
-//! - **Alt + ]**: Di chuyển tiêu điểm sang nút Taskbar bên phải ([`HotkeyAction::Right`])
+//! By default, the application registers two hotkeys:
+//! - **Alt + [**: Move focus to the left Taskbar button ([`HotkeyAction::Left`])
+//! - **Alt + ]**: Move focus to the right Taskbar button ([`HotkeyAction::Right`])
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS,
 };
 
-/// Các hành động có thể kích hoạt bởi phím nóng toàn cục
+/// Actions that can be triggered by global hotkeys.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum HotkeyAction {
-    /// Di chuyển tiêu điểm sang cửa sổ bên trái trên Taskbar.
+    /// Cycle focus to the left window on the Taskbar.
     CycleLeft,
-    /// Di chuyển tiêu điểm sang cửa sổ bên phải trên Taskbar.
+    /// Cycle focus to the right window on the Taskbar.
     CycleRight,
-    /// Chuyển đổi sang Virtual Desktop với index (0-based) chỉ định.
+    /// Switch to the Virtual Desktop with the specified index (0-based).
     SwitchVirtualDesktop(u32),
 }
 
-/// Lưu trữ thông tin chi tiết và trạng thái của một phím nóng cụ thể.
+/// Stores the details and state of a specific hotkey.
 struct Hotkey {
-    /// Mã định danh duy nhất (ID) của phím nóng trong phạm vi ứng dụng.
+    /// Unique identifier (ID) of the hotkey within the application scope.
     id: i32,
-    /// Hành động sẽ được thực thi khi phím nóng này được nhấn.
+    /// The action to be executed when this hotkey is pressed.
     action: HotkeyAction,
-    /// Các phím bổ trợ đi kèm (như phím Alt, Ctrl, Shift).
+    /// Accompanying modifier keys (such as Alt, Ctrl, Shift).
     modifiers: HOT_KEY_MODIFIERS,
-    /// Mã phím ảo (Virtual Key Code) của phím chính.
+    /// Virtual Key Code of the main key.
     vk: u32,
 }
 
 impl Hotkey {
-    /// Đăng ký phím nóng này với hệ thống Windows.
+    /// Registers this hotkey with the Windows system.
     ///
-    /// # Lỗi (Errors)
-    /// Trả về lỗi nếu phím nóng đã bị chiếm dụng bởi ứng dụng khác.
+    /// # Errors
+    /// Returns an error if the hotkey is already in use by another application.
     fn register(&self) -> windows::core::Result<()> {
         unsafe { RegisterHotKey(None, self.id, self.modifiers, self.vk) }
     }
 
-    /// Hủy đăng ký phím nóng này khỏi hệ thống Windows.
+    /// Unregisters this hotkey from the Windows system.
     fn unregister(&self) {
         unsafe {
             let _ = UnregisterHotKey(None, self.id);
@@ -50,25 +50,25 @@ impl Hotkey {
     }
 }
 
-/// Trình quản lý danh sách các phím nóng toàn cục của ứng dụng.
+/// Manager for the application's global hotkeys.
 pub struct HotkeyManager {
-    /// Danh sách các thực thể phím nóng đang được quản lý.
+    /// List of managed hotkey instances.
     hotkeys: Vec<Hotkey>,
 }
 
 impl HotkeyManager {
-    /// Khởi tạo trình quản lý và đăng ký các phím nóng mặc định với hệ thống.
+    /// Initializes the manager and registers the default hotkeys with the system.
     ///
-    /// Mặc định:
-    /// - ID 1: `Alt+[` -> Di chuyển trái ([`HotkeyAction::Left`]).
-    /// - ID 2: `Alt+]` -> Di chuyển phải ([`HotkeyAction::Right`]).
-    /// - ID 11-19: `Alt+1` -> `Alt+9` -> Chuyển VD tương ứng ([`HotkeyAction::SwitchVirtualDesktop`]).
+    /// Defaults:
+    /// - ID 1: `Alt+[` -> Cycle left ([`HotkeyAction::Left`]).
+    /// - ID 2: `Alt+]` -> Cycle right ([`HotkeyAction::Right`]).
+    /// - ID 11-19: `Alt+1` -> `Alt+9` -> Switch to respective VD ([`HotkeyAction::SwitchVirtualDesktop`]).
     ///
-    /// TODO: Cho phép người dùng tự điều chỉnh được phím tắt
+    /// TODO: Allow users to customize hotkeys.
     ///
     /// # Errors
-    /// Trả về lỗi nếu không thể đăng ký một hoặc nhiều phím nóng (thường do xung đột phím nóng với
-    /// phần mềm khác).
+    /// Returns an error if it fails to register one or more hotkeys (usually due to a conflict with
+    /// another software).
     pub fn new(config: &crate::config::AppConfig) -> anyhow::Result<Self> {
         let mut hotkeys = vec![];
 
@@ -87,7 +87,7 @@ impl HotkeyManager {
             });
         }
 
-        // Đăng ký phím nóng Switch Desktop nếu có ít nhất 1 phím bổ trợ
+        // Register Switch Desktop hotkeys if at least 1 modifier key is set
         if config.jump_desktop_modifiers != 0 {
             for i in 1..=9 {
                 hotkeys.push(Hotkey {
@@ -115,21 +115,21 @@ impl HotkeyManager {
         Ok(this)
     }
 
-    /// Hủy đăng ký toàn bộ các phím nóng đã được thiết lập với Windows.
+    /// Unregisters all hotkeys established with Windows.
     ///
-    /// Phương thức này được gọi tự động khi đối tượng `HotkeyManager` bị hủy ([`Drop`])
+    /// This method is called automatically when the `HotkeyManager` object is dropped ([`Drop`]).
     pub fn unregister_all(&self) {
         for hotkey in &self.hotkeys {
             hotkey.unregister();
         }
     }
 
-    /// Tìm kiếm hành động tương ứng với ID phím nóng nhận được từ tin nhắn hệ thống
+    /// Looks up the action corresponding to the hotkey ID received from the system message.
     pub fn action_from_id(&self, id: i32) -> Option<HotkeyAction> {
         self.hotkeys.iter().find(|h| h.id == id).map(|h| h.action)
     }
 
-    /// Tải lại cấu hình phím tắt: gỡ phím tắt cũ, nạp mới và đăng ký lại
+    /// Reloads the hotkey configuration: unregisters old ones, loads new ones, and registers them again.
     pub fn reload(&mut self, config: &crate::config::AppConfig) -> anyhow::Result<()> {
         for hotkey in &self.hotkeys {
             hotkey.unregister();

@@ -1,16 +1,16 @@
-//! Quản lý cửa sổ Debug Console. Dùng để logging realtime
+//! Manages the Debug Console window. Used for real-time logging.
 //!
-//! ## Kiến trúc: "Self-Invoking Console Worker"
+//! ## Architecture: "Self-Invoking Console Worker"
 //!
-//! Vì ứng dụng chính chạy với `#![windows_subsystem = "windows"]` (GUI App), nó không có stdout.
-//! Khi gọi subprocess bằng lệnh `Command` kèm `Stdio::piped()`, stdout mặc định sẽ là `NULL`.
+//! Because the main application runs with `#![windows_subsystem = "windows"]` (GUI App), it has no stdout.
+//! When calling a subprocess using the `Command` builder with `Stdio::piped()`, stdout defaults to `NULL`.
 //!
-//! Giải pháp: Ứng dụng **tự gọi lại chính nó** với tham số `--console-worker`.
-//! Tiến trình con:
-//! 1. Gọi `AllocConsole()` để tự tạo ra một Console Window mới (GUI App không tự có).
-//! 2. Mở file đặc biệt `CONOUT$` (ghi thẳng vào bộ đệm của Console hiện tại, bỏ qua `stdout` đã bị NULL).
-//! 3. Bật cờ `ENABLE_VIRTUAL_TERMINAL_PROCESSING` để hiển thị màu ANSI.
-//! 4. Đọc luồng `stdin` liên tục và in ra màn hình. Khi `stdin` bị đóng (app chính tắt) -> tiến trình con thoát.
+//! Solution: The application **calls itself** with the `--console-worker` parameter.
+//! The child process:
+//! 1. Calls `AllocConsole()` to create a new Console Window (GUI Apps don't have one by default).
+//! 2. Opens the special file `CONOUT$` (writes directly to the current Console's buffer, bypassing the `NULL` stdout).
+//! 3. Enables the `ENABLE_VIRTUAL_TERMINAL_PROCESSING` flag to display ANSI colors.
+//! 4. Continuously reads the `stdin` stream and prints to the screen. When `stdin` is closed (main app exits) -> the child process terminates.
 
 use std::io::{Read, Write};
 use std::os::windows::io::AsRawHandle;
@@ -26,19 +26,19 @@ extern "system" {
     fn SetConsoleTitleW(lpConsoleTitle: *const u16) -> i32;
 }
 
-/// Cờ đồng bộ trạng thái hiển thị Console.
+/// Synchronization flag for the Console visibility state.
 pub static CONSOLE_VISIBLE: AtomicBool = AtomicBool::new(false);
 
-/// Cờ báo hiệu ứng dụng đang chạy ở chế độ CLI debug (in log ra stdout).
+/// Flag indicating the application is running in CLI debug mode (logging to stdout).
 pub static DEBUG_CLI_MODE: AtomicBool = AtomicBool::new(false);
 
-/// Handle tiến trình con Console, bảo vệ bằng Mutex.
+/// Handle to the Console child process, protected by a Mutex.
 static CHILD_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
 
-/// Pipe stdin dùng chung cho `MakeWriter`, bảo vệ bằng Mutex.
+/// Shared stdin pipe for `MakeWriter`, protected by a Mutex.
 pub static CONSOLE_PIPE: Mutex<Option<std::process::ChildStdin>> = Mutex::new(None);
 
-/// Bật/tắt cửa sổ Debug Console.
+/// Toggles the Debug Console window.
 pub fn toggle() {
     if DEBUG_CLI_MODE.load(Ordering::SeqCst) {
         return;
@@ -54,13 +54,13 @@ pub fn toggle() {
     }
 }
 
-/// Chạy vòng lặp console worker (chỉ gọi từ tiến trình con)
+/// Runs the console worker loop (only called from the child process)
 pub fn run_worker() {
     unsafe {
         AllocConsole();
     }
 
-    // Cài đặt tiêu đề cửa sổ
+    // Set the window title
     let title = "Debug Console - Taskbar Switcher";
     let mut title_u16: Vec<u16> = title.encode_utf16().collect();
     title_u16.push(0);
@@ -68,8 +68,8 @@ pub fn run_worker() {
         SetConsoleTitleW(title_u16.as_ptr());
     }
 
-    // Mở CONOUT$ để ghi trực tiếp (vì stdout của gui app truyền qua đã bị NULL)
-    // Phải mở với quyền đọc/ghi để GetConsoleMode hoạt động
+    // Open CONOUT$ to write directly (since the GUI app's forwarded stdout is NULL)
+    // Must be opened with read/write access for GetConsoleMode to work
     let out_res = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -79,7 +79,7 @@ pub fn run_worker() {
     }
     let mut out = out_res.unwrap();
 
-    // Bật hỗ trợ màu sắc ANSI
+    // Enable ANSI color support
     let handle = out.as_raw_handle() as isize;
     let mut mode = 0;
     unsafe {
@@ -88,7 +88,7 @@ pub fn run_worker() {
         }
     }
 
-    // Tắt khả năng select (Quick Edit Mode) trên CONIN$
+    // Disable selection (Quick Edit Mode) on CONIN$
     if let Ok(in_file) = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -103,12 +103,12 @@ pub fn run_worker() {
         }
     }
 
-    // Đọc liên tục từ Stdin và ghi ra màn hình
+    // Continuously read from Stdin and write to the screen
     let mut stdin = std::io::stdin();
     let mut buf = [0u8; 1024];
     loop {
         match stdin.read(&mut buf) {
-            Ok(0) => break, // EOF -> app chính đã đóng
+            Ok(0) => break, // EOF -> main app has closed
             Ok(n) => {
                 if out.write_all(&buf[..n]).is_err() {
                     break;
@@ -119,7 +119,7 @@ pub fn run_worker() {
     }
 }
 
-/// Spawn tiến trình con `--console-worker`
+/// Spawns the `--console-worker` child process
 fn spawn_console() {
     kill_console();
 
@@ -129,7 +129,7 @@ fn spawn_console() {
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .creation_flags(CREATE_NEW_PROCESS_GROUP) // Nhóm tiến trình mới để khi ấn Ctrl+C không chết app chính
+        .creation_flags(CREATE_NEW_PROCESS_GROUP) // New process group so Ctrl+C doesn't kill the main app
         .spawn();
 
     match result {
@@ -145,9 +145,9 @@ fn spawn_console() {
     }
 }
 
-/// Tắt tiến trình PowerShell con.
+/// Kills the child console process.
 fn kill_console() {
-    // Đóng pipe trước để tiến trình con nhận EOF
+    // Close the pipe first so the child process receives EOF
     let _ = CONSOLE_PIPE.lock().unwrap().take();
 
     if let Some(mut child) = CHILD_PROCESS.lock().unwrap().take() {

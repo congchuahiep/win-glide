@@ -1,3 +1,9 @@
+//! Handles application bootstrap routines.
+//!
+//! This module includes functions responsible for initial application setup such as 
+//! enforcing single-instance restrictions via Mutex, attaching debug consoles, 
+//! and setting up DPI awareness for modern Windows displays.
+
 use std::sync::atomic::Ordering;
 use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS, LPARAM, WPARAM};
 use windows::Win32::System::Console::{AllocConsole, AttachConsole, ATTACH_PARENT_PROCESS};
@@ -7,8 +13,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
     FindWindowW, PostMessageW, SetForegroundWindow, ShowWindow, SW_RESTORE, WM_COMMAND,
 };
 
+/// Specifies the type of application instance to check for uniqueness.
 pub enum InstanceType {
+    /// The invisible background taskbar switcher engine.
     Background,
+    /// The foreground XAML settings user interface.
     SettingsUI,
 }
 
@@ -60,6 +69,11 @@ pub fn ensure_single_instance(instance_type: InstanceType) -> bool {
     }
 }
 
+/// Attaches a console to the current GUI application.
+///
+/// Windows GUI subsystem applications do not have a console by default.
+/// This function attempts to attach to the parent's console, and if that fails,
+/// allocates a new console window. Useful for debugging and CLI usage.
 pub fn attach_debug_console() {
     unsafe {
         if AttachConsole(ATTACH_PARENT_PROCESS).is_err() {
@@ -69,6 +83,10 @@ pub fn attach_debug_console() {
     crate::logging::console::DEBUG_CLI_MODE.store(true, Ordering::SeqCst);
 }
 
+/// Configures the process to be Per-Monitor DPI Aware V2.
+///
+/// This ensures the application scales correctly on modern high-DPI displays
+/// and dynamically responds to DPI changes without blurring.
 pub fn setup_dpi_awareness() {
     unsafe {
         let _ =

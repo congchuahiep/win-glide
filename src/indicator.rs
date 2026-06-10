@@ -1,4 +1,4 @@
-//! Cửa sổ hiển thị trạng thái (Indicator) trên Taskbar.
+//! Indicator window displaying status on the Taskbar.
 
 use std::slice::from_raw_parts_mut;
 use std::sync::atomic::{AtomicIsize, Ordering};
@@ -37,7 +37,7 @@ fn get_hovered_index(x: i32) -> Option<usize> {
         let half_spacing = spacing / 2.0;
         for i in 0..count {
             let cx = start_x + (i as f32) * spacing;
-            // Chuyển sang Hit-box hình chữ nhật (như khối div), nối liền nhau không có khoảng trống
+            // Switch to rectangular Hit-box (like a div block), connected continuously without gaps
             if px >= cx - half_spacing && px <= cx + half_spacing {
                 return Some(i);
             }
@@ -46,22 +46,22 @@ fn get_hovered_index(x: i32) -> Option<usize> {
     }
 }
 
-/// Cửa sổ hiển thị trạng thái (Indicator) trên Taskbar.
-/// Nó sử dụng cờ `WS_EX_LAYERED` kết hợp với `UpdateLayeredWindow` để vẽ đồ họa 32-bit có kênh Alpha (trong suốt).
+/// Indicator window displaying status on the Taskbar.
+/// It uses the `WS_EX_LAYERED` flag combined with `UpdateLayeredWindow` to draw 32-bit graphics with an Alpha (transparent) channel.
 pub struct IndicatorWindow {
     pub hwnd: HWND,
     _desktop_event_thread: Option<winvd::DesktopEventThread>,
 }
 
 impl IndicatorWindow {
-    /// Khởi tạo cửa sổ Indicator mới.
+    /// Initializes a new Indicator window.
     ///
-    /// **WARN: Vấn đề Task View (Win+Tab)**
-    /// Hiện tại cửa sổ này được đặt làm Owned Window của `Shell_TrayWnd` (Taskbar) để nó luôn nằm
-    /// trên Taskbar. Tuy nhiên, trên Windows 11, khi mở Task View (Win+Tab), hệ thống DWM sẽ tự
-    /// động dùng kỹ thuật "Cloaking" để ẩn tất cả các cửa sổ Owned của Taskbar. Kết quả là
-    /// Indicator sẽ biến mất trong lúc Task View đang mở, và thường chỉ hiện lại khi Taskbar nhận
-    /// được focus. Đây là hạn chế kỹ thuật hiện tại chưa có cách khắc phục triệt để
+    /// **WARN: Task View Issue (Win+Tab)**
+    /// Currently this window is set as an Owned Window of `Shell_TrayWnd` (Taskbar) so it always stays
+    /// on top of the Taskbar. However, on Windows 11, when opening Task View (Win+Tab), the DWM system automatically
+    /// uses "Cloaking" technique to hide all Owned windows of the Taskbar. As a result,
+    /// the Indicator will disappear while Task View is open, and usually only reappears when the Taskbar receives
+    /// focus. This is a current technical limitation with no complete workaround yet.
     pub unsafe fn new() -> anyhow::Result<Self> {
         let hinstance = GetModuleHandleW(None)?;
         let class_name = w!("TaskbarSwitcherIndicator");
@@ -106,9 +106,9 @@ impl IndicatorWindow {
         Ok(this)
     }
 
-    /// Khởi chạy luồng theo dõi sự kiện đổi Desktop (Virtual Desktop).
-    /// Khi phát hiện người dùng chuyển Desktop, nó sẽ gửi tin nhắn `WM_APP_VD_EVENT` về luồng UI chính
-    /// để yêu cầu vẽ lại (render) các chấm Indicator, hiển thị đúng Desktop hiện tại.
+    /// Starts a thread to monitor Desktop switching events (Virtual Desktop).
+    /// When it detects the user switching Desktops, it sends a `WM_APP_VD_EVENT` message to the main UI thread
+    /// to request a re-render of the Indicator dots, accurately displaying the current Desktop.
     pub fn run(&mut self) {
         let (tx, rx) = std::sync::mpsc::channel::<winvd::DesktopEvent>();
         let hwnd_ind_ptr = self.hwnd.0 as isize;
@@ -135,14 +135,14 @@ impl IndicatorWindow {
         }
     }
 
-    /// Hàm vẽ (render) nội dung Indicator lên vùng nhớ đệm, sau đó đẩy trực tiếp lên màn hình.
+    /// Renders Indicator content to a buffer, then pushes it directly to the screen.
     ///
-    /// Thay vì dùng GDI tiêu chuẩn (gây lỗi viền đen răng cưa khi kết hợp với `LWA_COLORKEY`),
-    /// hàm này khởi tạo một bitmap 32-bit ARGB (DIBSection), vẽ các chấm tròn bằng thuật toán SDF
-    /// (Signed Distance Field) để có hiệu ứng khử răng cưa mượt mà, sau đó dùng `UpdateLayeredWindow`
-    /// để áp dụng toàn bộ kênh Alpha lên Desktop
+    /// Instead of using standard GDI (which causes jagged black border artifacts when combined with `LWA_COLORKEY`),
+    /// this function initializes a 32-bit ARGB bitmap (DIBSection), draws circular dots using the SDF
+    /// (Signed Distance Field) algorithm for smooth anti-aliasing, then uses `UpdateLayeredWindow`
+    /// to apply the entire Alpha channel onto the Desktop.
     ///
-    /// Thú thật thì tôi không biết hàm này hoạt động như thế nào nữa :P
+    /// To be honest, I don't even know how this function works anymore :P
     pub fn render(hwnd: HWND) {
         unsafe {
             let mut tray_rect = RECT::default();
@@ -178,8 +178,8 @@ impl IndicatorWindow {
             if let Ok(bmp) = hbitmap {
                 let old_bmp = SelectObject(mem_dc, HGDIOBJ(bmp.0 as _));
 
-                // Trỏ mảng rust vào bộ đệm của hình ảnh
-                // Điền nền màu đen nhưng có độ trong suốt 0 (Alpha = 0) => Tàng hình 100%
+                // Point rust array to image buffer
+                // Fill with black background but 0 transparency (Alpha = 0) => 100% invisible
                 let buffer = from_raw_parts_mut(ppvbits as *mut u32, (width * height) as usize);
                 buffer.fill(0);
 
@@ -193,9 +193,9 @@ impl IndicatorWindow {
                     false => (100, 100, 100),
                 };
 
-                // Taskbar ở 1080p thường cao 48px, ở 4K (200%) cao 96px.
-                // Việc bám theo chiều cao Taskbar giúp tỷ lệ luôn chuẩn xác 100% trên mọi màn hình.
-                let radius = height as f32 * 0.07; // Bán kính = 7% chiều cao (tương đương ~3.36px ở 1080p)
+                // Taskbar at 1080p is usually 48px high, at 4K (200%) it's 96px high.
+                // Binding to Taskbar height keeps the aspect ratio 100% accurate on all screens.
+                let radius = height as f32 * 0.07; // Radius = 7% height (equivalent to ~3.36px at 1080p)
                 let spacing = radius * 5.;
                 let start_x = 10.0 + radius;
                 let cy = height as f32 / 2.0;
@@ -219,8 +219,8 @@ impl IndicatorWindow {
                     let cx = start_x + (i as f32) * spacing;
                     let is_hovered = hover_idx == (i as isize);
 
-                    // Vẽ khối Div vô hình (Alpha = 1) làm Hitbox bao quanh chấm tròn.
-                    // Nếu đang hover, vẽ thêm nền bo góc nhẹ (Alpha = 0.15)
+                    // Draw invisible Div block (Alpha = 1) as a Hitbox surrounding the dot.
+                    // If hovering, draw a slight rounded background (Alpha = 0.15)
                     Self::draw_hitbox_and_bg(
                         buffer,
                         width,
@@ -235,17 +235,17 @@ impl IndicatorWindow {
 
                     let mut current_radius = radius;
                     let mut base_alpha = if is_active {
-                        current_radius *= 1.25; // Active indicator to bằng lúc hover
+                        current_radius *= 1.25; // Active indicator is as big as when hovered
                         1.0
                     } else {
                         0.5
                     };
 
-                    // Hiệu ứng Hover
+                    // Hover effect
                     if is_hovered {
-                        current_radius = radius * 1.25; // Đảm bảo phóng to 25% (không nhân đôi nếu vừa active vừa hover)
+                        current_radius = radius * 1.25; // Ensure 25% enlargement (don't double if both active and hovered)
                         if base_alpha < 0.8 {
-                            base_alpha = 0.8; // Làm sáng lên
+                            base_alpha = 0.8; // Brighten up
                         }
                     }
 
@@ -261,7 +261,7 @@ impl IndicatorWindow {
                     );
                 }
 
-                // Cập nhật lên màn hình
+                // Update to screen
                 let mut pt_src = POINT { x: 0, y: 0 };
                 let mut size = SIZE {
                     cx: width,
@@ -299,7 +299,7 @@ impl IndicatorWindow {
         }
     }
 
-    /// Vẽ khối hình chữ nhật "vô hình" (Hitbox) và nền mờ bo góc khi Hover
+    /// Draws an "invisible" rectangular block (Hitbox) and blurred rounded background on Hover
     fn draw_hitbox_and_bg(
         buffer: &mut [u32],
         width: i32,
@@ -317,22 +317,22 @@ impl IndicatorWindow {
 
         let cy = height as f32 / 2.0;
 
-        // bg_rw: Bán kính chiều ngang của nền hover (Width = bg_rw * 2)
-        // Thay vì trừ đi margin, ta để nguyên `spacing / 2.0` để các nền hover chạm sát vào nhau (không có gap)
+        // bg_rw: Horizontal radius of hover background (Width = bg_rw * 2)
+        // Instead of subtracting margin, we leave `spacing / 2.0` so hover backgrounds touch continuously (no gap)
         let bg_rw = spacing / 2.0;
 
-        // bg_rh: Bán kính chiều dọc của nền hover (Height = bg_rh * 2)
-        // Trừ đi 6px để tạo khoảng cách (padding) so với mép trên/dưới của thanh Taskbar
+        // bg_rh: Vertical radius of hover background (Height = bg_rh * 2)
+        // Subtract 6px to create padding from the top/bottom edges of the Taskbar
         let bg_rh = (height as f32) / 2.0 - 6.0;
 
-        // Độ bo góc của nền hover (Càng lớn càng tròn, tối đa bằng bg_rh)
+        // Corner radius of hover background (Larger means rounder, max is bg_rh)
         let corner_radius = 6.0;
 
         let inner_w = bg_rw - corner_radius;
         let inner_h = bg_rh - corner_radius;
         let (r, g, b) = theme_color;
 
-        let base_alpha = 0.3; // Độ trong suốt của nền hover
+        let base_alpha = 0.3; // Transparency of hover background
 
         for y in min_y..=max_y {
             for x in min_x..=max_x {
@@ -376,7 +376,7 @@ impl IndicatorWindow {
         }
     }
 
-    /// Vẽ một hình tròn SDF có khử răng cưa trực tiếp lên buffer ARGB 32-bit.
+    /// Draws an anti-aliased SDF circle directly onto a 32-bit ARGB buffer.
     fn draw_aa_circle(
         buffer: &mut [u32],
         width: i32,
@@ -402,7 +402,7 @@ impl IndicatorWindow {
                 let dy = py - cy;
                 let distance = (dx * dx + dy * dy).sqrt();
 
-                // Khử răng cưa (SDF)
+                // Anti-aliasing (SDF)
                 let mut alpha = if distance <= radius - 0.5 {
                     1.0
                 } else if distance >= radius + 0.5 {
@@ -430,7 +430,7 @@ impl IndicatorWindow {
         }
     }
 
-    /// Hàm xử lý tin nhắn (Message Procedure) cốt lõi của cửa sổ Indicator.
+    /// Core Message Procedure for the Indicator window.
     unsafe extern "system" fn window_proc(
         hwnd: HWND,
         msg: u32,
@@ -443,8 +443,8 @@ impl IndicatorWindow {
                 LRESULT(0)
             }
             WM_DISPLAYCHANGE | WM_SETTINGCHANGE => {
-                // Thoát khỏi "Input Sync Call" trước khi gọi render (COM), việc này giúp khi
-                // rerender lại được lấy state mới nhất
+                // Exit "Input Sync Call" before calling render (COM), which helps
+                // get the latest state when rerendering
                 unsafe {
                     let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
                         Some(hwnd),

@@ -1,7 +1,7 @@
-//! Hệ thống taskbar - module chính của Taskbar Switcher.
+//! Taskbar system - the core module of WinGlide.
 //!
-//! Quản lý toàn bộ vòng đời của taskbar: liệt kê buttons qua UI Automation,
-//! ánh xạ button với window, kích hoạt window, và tách/gộp buttons (uncombine).
+//! Manages the entire taskbar lifecycle: enumerating buttons via UI Automation,
+//! mapping buttons to windows, activating windows, and uncombining buttons.
 
 mod activate;
 mod button_window;

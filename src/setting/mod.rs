@@ -1,7 +1,7 @@
-//! Cung cấp các thành phần giao diện cài đặt (Settings UI) cho ứng dụng.
+//! Provides the Settings UI components for the application.
 //!
-//! Module này chứa các tệp định nghĩa giao diện người dùng dựa trên thư viện `windows-reactor`,
-//! bao gồm cài đặt thanh Taskbar, các component tuỳ chỉnh như Expander và giao diện chính.
+//! This module contains user interface definitions built on top of the `windows-reactor` crate,
+//! including taskbar settings, custom components like Expanders, and the main UI layout.
 
 mod hotkey_button;
 mod setting_item;

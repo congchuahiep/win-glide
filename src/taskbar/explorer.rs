@@ -1,15 +1,15 @@
-//! Cache PID của explorer.exe - dùng để phân biệt button của explorer
-//! với button của app thực trong matching logic.
+//! Caches the PID of explorer.exe - used to distinguish explorer buttons
+//! from actual app buttons in the matching logic.
 
 use std::os::windows::process::CommandExt;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tracing::debug;
 
-/// Lấy PID của explorer.exe, cache bằng atomic.
+/// Gets the PID of explorer.exe, cached using an atomic.
 ///
-/// Cache valid đến khi [`invalidate_explorer_pid_cache`] được gọi
-/// (từ `TaskbarEnumerator::refresh_taskbar_hwnd` khi explorer restart).
+/// The cache is valid until [`invalidate_explorer_pid_cache`] is called
+/// (from `TaskbarEnumerator::refresh_taskbar_hwnd` when explorer restarts).
 pub(super) fn get_explorer_pid() -> u32 {
     if EXPLORER_PID_VALID.load(Ordering::Relaxed) {
         return EXPLORER_PID_CACHE.load(Ordering::Relaxed);
@@ -36,7 +36,7 @@ pub(super) fn get_explorer_pid() -> u32 {
     pid
 }
 
-/// Invalidate explorer PID cache - gọi khi explorer restart.
+/// Invalidates the explorer PID cache - called when explorer restarts.
 pub(super) fn invalidate_explorer_pid_cache() {
     EXPLORER_PID_VALID.store(false, Ordering::Relaxed);
     debug!("Explorer PID cache invalidated");

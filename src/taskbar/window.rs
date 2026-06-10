@@ -1,4 +1,4 @@
-//! Tìm kiếm cửa sổ và đọc thuộc tính window (AppUserModelID, process name).
+//! Finds windows and reads window properties (AppUserModelID, process name).
 
 use std::{collections::HashMap, sync::Mutex};
 
@@ -26,7 +26,7 @@ struct EnumData {
     windows: Vec<WindowInfo>,
 }
 
-/// Liệt kê tất cả cửa sổ visible trên desktop, bỏ qua system windows.
+/// Enumerates all visible windows on the desktop, ignoring system windows.
 #[instrument(level = "debug", skip_all)]
 pub(super) fn find_visible_windows() -> Vec<WindowInfo> {
     let mut data = EnumData {
@@ -94,7 +94,7 @@ unsafe fn find_window_by_hwnd(hwnd: HWND) -> WindowInfo {
     }
 }
 
-/// Lấy tên process từ PID, có cache nội bộ.
+/// Gets the process name from PID, with internal caching.
 fn get_process_name(pid: u32) -> String {
     use windows::Win32::System::Threading::PROCESS_NAME_FORMAT;
 
@@ -146,9 +146,9 @@ fn get_process_name(pid: u32) -> String {
     name
 }
 
-/// Lấy AppUserModelID từ window qua `SHGetPropertyStoreForWindow`.
+/// Gets AppUserModelID from a window via `SHGetPropertyStoreForWindow`.
 ///
-/// Đây là cơ chế chính thức Windows dùng để group taskbar buttons.
+/// This is the official mechanism Windows uses to group taskbar buttons.
 pub(super) fn get_app_user_model_id(hwnd: HWND) -> Option<String> {
     unsafe {
         let store: IPropertyStore = match SHGetPropertyStoreForWindow(hwnd) {

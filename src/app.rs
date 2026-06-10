@@ -1,11 +1,11 @@
-//! Module quản lý trạng thái ứng dụng và điều phối tất cả các thành phần.
+//! Application state management module and orchestrator of all components.
 //!
-//! Struct [`App`], đóng vai trò là trung tâm điều khiển (orchestrator) của ứng dụng. Nó tích hợp và
-//!  quản lý vòng đời của:
-//! - Quản lý phím nóng toàn cục ([`HotkeyManager`]) để lắng nghe tổ hợp phím Alt+[/].
-//! - Duyệt tìm các nút trên Taskbar ([`TaskbarEnumerator`]) thông qua UI Automation (UIA).
-//! - Điều khiển tính năng nhóm/tách nút ([`UncombineManager`]) cho các cửa sổ.
-//! - Tạo khay hệ thống ([`TrayIcon`]) và cửa sổ ẩn để giao tiếp với Windows Message Loop.
+//! The [`App`] struct acts as the orchestrator of the application. It integrates and
+//! manages the lifecycle of:
+//! - Global hotkey manager ([`HotkeyManager`]) to listen for the Alt+[/] key combinations.
+//! - Taskbar button enumerator ([`TaskbarEnumerator`]) via UI Automation (UIA).
+//! - Combining/uncombining feature control ([`UncombineManager`]) for windows.
+//! - Creating the system tray icon ([`TrayIcon`]) and hidden window to communicate with the Windows Message Loop.
 
 #[cfg(doc)]
 use aquamarine::aquamarine;
@@ -26,19 +26,19 @@ use crate::setting;
 use crate::taskbar::{CycleDirection, TaskbarEnumerator, UncombineManager};
 use crate::tray_icon::{TrayIcon, IDM_EXIT, IDM_SETTINGS, IDM_SHOW_CONSOLE};
 
-/// Định danh thông điệp Windows động "TaskbarCreated".
-/// Thông điệp này được gửi khi tiến trình Explorer khởi động lại.
+/// Dynamic Windows message identifier "TaskbarCreated".
+/// This message is sent when the Explorer process restarts.
 static mut WM_TASKBARCREATED: u32 = 0;
 
-/// Hằng số định danh thông điệp khay hệ thống gửi đến cửa sổ ẩn.
+/// Constant identifier for the message the system tray sends to the hidden window.
 const WM_USER_TRAYICON: u32 = WM_USER + 0x200;
 
-/// Đại diện cho toàn bộ trạng thái của ứng dụng Taskbar Switcher.
+/// Represents the entire state of the Taskbar Switcher application.
 ///
-/// Struct này duy trì các kết nối phần cứng và phần mềm, bao gồm các hook sự kiện,
-/// phím nóng, khay hệ thống và thông tin cửa sổ ẩn Win32 để lắng nghe thông điệp hệ thống.
+/// This struct maintains hardware and software connections, including event hooks,
+/// hotkeys, system tray, and Win32 hidden window information to listen to system messages.
 ///
-/// ### Luồng Xử Lý Windows Message Loop (Windows API)
+/// ### Windows Message Loop Processing Flow (Windows API)
 ///
 /// ```mermaid
 /// sequenceDiagram
@@ -47,9 +47,9 @@ const WM_USER_TRAYICON: u32 = WM_USER + 0x200;
 ///     participant MsgLoop as App::run (Message Loop)
 ///     participant WndProc as App::window_proc (Static Callback)
 ///     participant App as App (Instance)
-///     Note over MsgLoop: Vòng lặp tin nhắn chạy cho đến khi running = false
-///     MsgLoop->>OS: Gọi GetMessageW() để lấy tin nhắn kế tiếp
-///     OS-->>MsgLoop: Trả về cấu trúc tin nhắn (MSG)
+///     Note over MsgLoop: Message loop runs until running = false
+///     MsgLoop->>OS: Calls GetMessageW() to get the next message
+///     OS-->>MsgLoop: Returns message structure (MSG)
 ///     alt msg.hwnd.0.is_null() (Thread Message)
 ///         MsgLoop->>App: dispatch_thread_message(&msg)
 ///         alt WM_HOTKEY
@@ -59,62 +59,62 @@ const WM_USER_TRAYICON: u32 = WM_USER + 0x200;
 ///         else WM_APP_INVALIDATE_CACHE
 ///             App->>App: handle_cache_invalidate(wParam)
 ///         end
-///     else msg.hwnd.0.is_null() là false (Window Message)
+///     else msg.hwnd.0.is_null() is false (Window Message)
 ///         MsgLoop->>OS: TranslateMessage(&msg) & DispatchMessageW(&msg)
-///         OS->>WndProc: Kích hoạt callback: window_proc(hwnd, msg, wparam, lparam)
-///         Note over WndProc: Truy xuất con trỏ App từ GWLP_USERDATA
+///         OS->>WndProc: Triggers callback: window_proc(hwnd, msg, wparam, lparam)
+///         Note over WndProc: Retrieves App pointer from GWLP_USERDATA
 ///         WndProc->>App: handle_window_message(msg, wparam, lparam)
 ///         alt WM_USER_TRAYICON
 ///             App->>App: tray_icon.show(...)
 ///         else WM_COMMAND
-///             App->>App: Xử lý lệnh menu (Exit / Toggle Combine Mode)
+///             App->>App: Handles menu commands (Exit / Toggle Combine Mode)
 ///         else WM_DESTROY
-///             App->>App: Thiết lập running = false
+///             App->>App: Sets running = false
 ///         else WM_TASKBARCREATED
 ///             App->>App: tray_icon.reregister()
 ///         end
-///         App-->>WndProc: Trả về kết quả (LRESULT)
-///         WndProc-->>OS: Trả về kết quả
-///         OS-->>MsgLoop: Hoàn thành DispatchMessageW()
+///         App-->>WndProc: Returns result (LRESULT)
+///         WndProc-->>OS: Returns result
+///         OS-->>MsgLoop: Completes DispatchMessageW()
 ///     end
 /// ```
 #[cfg_attr(doc, aquamarine)]
 pub struct App {
-    /// Trình duyệt và điều hướng các nút trên thanh Taskbar.
+    /// Enumerates and navigates buttons on the Taskbar.
     enumerator: TaskbarEnumerator,
 
-    /// Trình quản lý đăng ký và gỡ bỏ phím nóng toàn cục (Alt+[` / Alt+`]).
+    /// Manager for registering and unregistering global hotkeys (Alt+[` / Alt+`]).
     hotkey_manager: HotkeyManager,
 
-    /// Trình quản lý cấu hình tách/gộp nhóm (Uncombine) của các cửa sổ Taskbar.
-    /// Được leak tĩnh (`&'static`) để an toàn khi chia sẻ giữa các luồng/callback WinEvent.
+    /// Manager for configuring combining/uncombining of Taskbar windows.
+    /// Statically leaked (`&'static`) for thread-safe sharing between threads/WinEvent callbacks.
     uncombine_manager: Box<UncombineManager>,
 
-    /// Cờ xác định chế độ gộp nhóm (Combine mode) hiện tại có bật hay không.
+    /// Flag determining whether the current uncombine mode is enabled.
     uncombine_enabled: AtomicBool,
 
-    /// Cờ điều khiển việc duy trì chạy vòng lặp tin nhắn (Message Loop).
+    /// Control flag to maintain the running state of the Message Loop.
     running: Arc<AtomicBool>,
 
-    /// Khay hệ thống đại diện cho ứng dụng trên thanh Taskbar phụ.
+    /// System tray icon representing the application on the secondary Taskbar.
     tray_icon: TrayIcon,
 
-    /// Cửa sổ ẩn xử lý thông điệp hệ thống (Hidden Window).
+    /// Hidden window for processing system messages.
     hidden_window: HiddenWindow,
 
-    /// Cửa sổ Indicator hiển thị trạng thái Virtual Desktop.
+    /// Indicator window displaying Virtual Desktop status.
     indicator_window: Option<IndicatorWindow>,
 }
 
 impl App {
-    /// Khởi tạo và liên kết tất cả các thành phần cốt lõi của ứng dụng.
+    /// Initializes and links all core components of the application.
     ///
-    /// Tham số `combine_enabled` xác định trạng thái ban đầu của việc gộp nhóm nút.
+    /// The `combine_enabled` parameter determines the initial state of button grouping.
     ///
     /// # Errors
     ///
-    /// Hàm sẽ trả về lỗi nếu không thể khởi tạo [`TaskbarEnumerator`], [`HotkeyManager`],
-    /// tạo cửa sổ ẩn Win32 hoặc đăng ký khay hệ thống ([`TrayIcon`]).
+    /// Returns an error if it fails to initialize [`TaskbarEnumerator`], [`HotkeyManager`],
+    /// create the Win32 hidden window, or register the system tray icon ([`TrayIcon`]).
     pub fn new(config: &AppConfig) -> anyhow::Result<Self> {
         let enumerator = TaskbarEnumerator::new()?;
         let hotkey_manager = HotkeyManager::new(config)?;
@@ -147,15 +147,15 @@ impl App {
         })
     }
 
-    /// Khởi chạy vòng lặp tin nhắn chính (Main Message Loop) của ứng dụng.
+    /// Launches the main message loop of the application.
     ///
-    /// Thực hiện việc cài đặt các Hook sự kiện (WinEventHook và UI Automation Hook),
-    /// áp dụng chế độ Uncombine ban đầu và bắt đầu nhận/xử lý các tin nhắn từ Windows.
-    /// Khi ứng dụng kết thúc, hàm sẽ thực hiện dọn dẹp và khôi phục trạng thái hệ thống.
+    /// Installs event hooks (WinEventHook and UI Automation Hook),
+    /// applies the initial uncombine mode, and starts receiving/processing Windows messages.
+    /// When the application ends, the function will clean up and restore the system state.
     ///
     /// # Safety
     ///
-    /// Hàm này bắt buộc phải được chạy trên luồng main đã khởi tạo COM dưới dạng STA
+    /// This function must be run on the main thread which has initialized COM as STA
     /// (`COINIT_APARTMENTTHREADED`).
     pub unsafe fn run(&mut self, main_thread_id: u32) -> anyhow::Result<()> {
         if let Some(indicator) = &mut self.indicator_window {
@@ -200,13 +200,13 @@ impl App {
         Ok(())
     }
 
-    /// Xử lý và điều phối các tin nhắn luồng (Thread Messages).
+    /// Processes and dispatches thread messages.
     ///
-    /// Các tin nhắn được gửi qua [`PostThreadMessageW`] không có handle cửa sổ cụ thể.
-    /// Chúng ta cần tự phân tích và định tuyến đến các hàm xử lý tương ứng:
-    /// - `WM_HOTKEY`: Xử lý khi người dùng nhấn tổ hợp phím nóng.
-    /// - `WM_APP_UNCOMBINE`: Xử lý việc tách nhóm cho một cửa sổ mới.
-    /// - `WM_APP_INVALIDATE_CACHE`: Xóa bộ nhớ đệm danh sách các nút Taskbar.
+    /// Messages sent via [`PostThreadMessageW`] do not have a specific window handle.
+    /// We need to analyze and route them to their corresponding handlers:
+    /// - `WM_HOTKEY`: Handled when the user presses a hotkey combination.
+    /// - `WM_APP_UNCOMBINE`: Handled when uncombining a newly appeared window.
+    /// - `WM_APP_INVALIDATE_CACHE`: Clears the cached list of Taskbar buttons.
     fn dispatch_thread_message(&mut self, msg: &MSG) {
         match msg.message {
             WM_HOTKEY => self.handle_hotkey(msg.wParam),
@@ -217,9 +217,9 @@ impl App {
         }
     }
 
-    /// Xử lý các thông điệp Win32 hướng cửa sổ (Window Messages).
+    /// Processes Win32 window-directed messages.
     ///
-    /// Trả về `Some(LRESULT)` nếu thông điệp đã được xử lý và không cần chuyển tiếp đến `DefWindowProcW`.
+    /// Returns `Some(LRESULT)` if the message has been processed and does not need to be forwarded to `DefWindowProcW`.
     pub fn handle_window_message(
         &mut self,
         msg: u32,
@@ -229,7 +229,7 @@ impl App {
         match msg {
             WM_USER_TRAYICON => {
                 let mouse_event = lparam.0 as u32;
-                // Hiển thị menu ngữ cảnh tại vị trí con trỏ chuột
+                // Show context menu at cursor position
                 if mouse_event == WM_LBUTTONUP || mouse_event == WM_RBUTTONUP {
                     if let Err(e) = self.tray_icon.show(CONSOLE_VISIBLE.load(Ordering::SeqCst)) {
                         error!("show_context_menu: {e}");
@@ -247,7 +247,7 @@ impl App {
                 unsafe { windows::Win32::UI::WindowsAndMessaging::PostQuitMessage(0) };
                 Some(LRESULT(0))
             }
-            // Các lệnh Command được gửi từ Menu ngữ cảnh của Khay hệ thống
+            // Commands sent from the system tray context menu
             WM_COMMAND => {
                 let id = loword(wparam.0 as u32);
                 match id {
@@ -270,7 +270,7 @@ impl App {
                 Some(LRESULT(0))
             }
 
-            // Hủy cửa sổ ẩn (ví dụ: khi hệ thống tắt cửa sổ này)
+            // Destroy hidden window (e.g., when the system closes this window)
             WM_DESTROY => {
                 self.running.store(false, Ordering::SeqCst);
                 Some(LRESULT(0))
@@ -279,7 +279,7 @@ impl App {
             // Windows shutdown forced
             WM_QUERYENDSESSION => Some(LRESULT(1)),
 
-            // Windows shutdown đang diễn ra!! Cleanup gấp!!
+            // Windows shutdown in progress!! Urgent cleanup!!
             WM_ENDSESSION => {
                 if wparam.0 != 0 {
                     self.running.store(false, Ordering::SeqCst);
@@ -290,8 +290,8 @@ impl App {
                 Some(LRESULT(0))
             }
 
-            // Thông điệp đặc biệt từ Windows Explorer thông báo thanh Taskbar đã được tạo lại.
-            // Điều này xảy ra khi tiến trình explorer.exe khởi động lại.
+            // Special message from Windows Explorer notifying that the Taskbar has been recreated.
+            // This occurs when the explorer.exe process restarts.
             _ if msg == unsafe { WM_TASKBARCREATED } => {
                 info!("TaskbarCreated, re-registering tray icon");
                 if let Err(e) = self.tray_icon.reregister() {
@@ -300,7 +300,7 @@ impl App {
                 Some(LRESULT(0))
             }
 
-            // Cập nhật giao diện khi người dùng thay đổi chế độ sáng/tối trong Windows Settings
+            // Update UI when the user changes light/dark mode in Windows Settings
             WM_SETTINGCHANGE => {
                 let lparam_str = if lparam.0 != 0 {
                     unsafe {
@@ -327,11 +327,11 @@ impl App {
 }
 
 impl App {
-    /// Tạo một cửa sổ Win32 ẩn để nhận các sự kiện hệ thống. Đại diện ứng dụng window hiện tại
-    /// để chạy ngầm
+    /// Creates a hidden Win32 window to receive system events. Represents the current window application
+    /// running in the background.
     ///
-    /// Cửa sổ này không hiển thị trên màn hình và có thuộc tính `WS_EX_TOOLWINDOW` để
-    /// không xuất hiện trên Taskbar hoặc trình chuyển đổi Alt+Tab.
+    /// This window is not visible on the screen and has the `WS_EX_TOOLWINDOW` attribute so
+    /// it doesn't appear on the Taskbar or Alt+Tab switcher.
     fn create_hidden_window() -> anyhow::Result<HiddenWindow> {
         let hinstance = unsafe { GetModuleHandleW(None) }?;
 
@@ -367,10 +367,10 @@ impl App {
         Ok(HiddenWindow { hwnd })
     }
 
-    /// Thủ tục cửa sổ tĩnh (Window Procedure) nhận các sự kiện từ hệ thống và chuyển tiếp tới `App`.
+    /// Static window procedure to receive system events and forward them to `App`.
     ///
-    /// Sử dụng con trỏ của đối tượng `App` được lưu trữ trong `GWLP_USERDATA` để gọi phương thức
-    /// `handle_window_message` tương ứng.
+    /// Uses the pointer to the `App` object stored in `GWLP_USERDATA` to call the corresponding
+    /// `handle_window_message` method.
     unsafe extern "system" fn window_proc(
         hwnd: HWND,
         msg: u32,
@@ -422,11 +422,11 @@ impl App {
         info!("Configuration reloaded successfully.");
     }
 
-    /// Xử lý sự kiện nhấn phím nóng toàn cục
+    /// Handles global hotkey press events.
     ///
-    /// Chuyển đổi ID phím nóng thành hành động di chuyển trái/phải trên thanh Taskbar.
-    /// Ngoài ra, cơ chế này tự động dọn dẹp các sự kiện WM_HOTKEY lặp lại do cơ chế
-    /// auto-repeat của Windows sinh ra khi giữ phím lâu để tránh di chuyển vượt tầm kiểm soát.
+    /// Converts hotkey ID to left/right cycle actions on the Taskbar.
+    /// Additionally, this mechanism automatically cleans up repeated WM_HOTKEY events generated by
+    /// the Windows auto-repeat mechanism when a key is held down to prevent uncontrollable cycling.
     fn handle_hotkey(&self, wparam: WPARAM) {
         match self.hotkey_manager.action_from_id(wparam.0 as i32) {
             Some(HotkeyAction::CycleLeft) => {
@@ -434,7 +434,7 @@ impl App {
                     self.uncombine_enabled.load(Ordering::SeqCst),
                     CycleDirection::Backward,
                 ) {
-                    Ok(_) => { /* Thành công */ }
+                    Ok(_) => { /* Success */ }
                     Err(e) => error!("Error cycling taskbar: {e}"),
                 }
             }
@@ -443,7 +443,7 @@ impl App {
                     self.uncombine_enabled.load(Ordering::SeqCst),
                     CycleDirection::Forward,
                 ) {
-                    Ok(_) => { /* Thành công */ }
+                    Ok(_) => { /* Success */ }
                     Err(e) => error!("Error cycling taskbar: {e}"),
                 }
             }
@@ -456,20 +456,20 @@ impl App {
             None => {}
         }
 
-        // Khi người dùng bấm giữ phím, Windows auto-repeat sẽ sinh ra hàng loạt sự kiện WM_HOTKEY
-        // trong lúc main thread đang bị block bởi lệnh cycle_to_neighbor.
+        // When the user holds down a key, Windows auto-repeat generates a flood of WM_HOTKEY events
+        // while the main thread is blocked by the cycle_to_neighbor command.
         //
-        // Dọn sạch hàng đợi (PeekMessage) loại bỏ các lệnh thừa này để tránh trượt cửa sổ khi
-        // thả tay.
+        // Clear the queue (PeekMessage) to discard these extra commands and prevent runaway cycling
+        // when the key is released.
         unsafe {
             let mut msg = std::mem::zeroed();
             while PeekMessageW(&mut msg, None, WM_HOTKEY, WM_HOTKEY, PM_REMOVE).as_bool() {}
         }
     }
 
-    /// Xử lý sự kiện yêu cầu tách nhóm (Uncombine) cho một cửa sổ mới xuất hiện.
+    /// Handles the request to uncombine a newly appearing window.
     ///
-    /// Hàm này được kích hoạt khi hook WinEvent bắt được sự kiện hiển thị cửa sổ mới.
+    /// This function is triggered when the WinEvent hook catches a new window display event.
     fn handle_uncombine(&self, wparam: WPARAM) {
         let hwnd = HWND(wparam.0 as *mut _);
         let _guard = debug_span!("winevent", event = "UNCOMBINE").entered();
@@ -480,9 +480,9 @@ impl App {
         }
     }
 
-    /// Xóa bộ nhớ đệm (cache) lưu các nút Taskbar khi phát hiện cấu trúc Taskbar thay đổi.
+    /// Clears the cache storing Taskbar buttons when a structural change in the Taskbar is detected.
     ///
-    /// Đồng thời, thiết lập lại cờ báo hiệu đã xử lý xong để chuẩn bị cho lần invalidate tiếp theo.
+    /// Additionally, resets the processed flag to prepare for the next invalidate.
     fn handle_cache_invalidate(&self, wparam: WPARAM) {
         let source = InvalidateSource::from_wparam(wparam.0);
         let _guard = debug_span!("winevent", event = "INVALIDATE_CACHE", %source).entered();
@@ -499,7 +499,7 @@ impl Drop for App {
     }
 }
 
-/// Lấy phần byte thấp (16-bit) của một số 32-bit (tương tự vĩ lệnh LOWORD trong C++).
+/// Retrieves the low-order word (16 bits) from a 32-bit value (similar to the LOWORD macro in C++).
 fn loword(value: u32) -> u32 {
     value & 0xFFFF
 }

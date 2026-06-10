@@ -1,3 +1,9 @@
+//! WinGlide - A modern taskbar window switcher for Windows 11.
+//!
+//! This is the main entry point of the application. It configures the Windows subsystem,
+//! sets up panic handlers for crash reporting, and dispatches the execution flow based
+//! on the command-line arguments (e.g., running as a background app, settings UI, or console worker).
+
 #![windows_subsystem = "windows"]
 
 mod admin;
@@ -17,6 +23,15 @@ mod types;
 mod updater;
 mod utils;
 
+/// Displays a fatal error message box to the user.
+///
+/// This function uses the native Windows API `MessageBoxW` to show an error dialog.
+/// It is primarily used when the application fails to initialize or encounters a panic,
+/// ensuring the user is informed even if the logger or UI is not available.
+///
+/// # Arguments
+///
+/// * `error_msg` - The error message string to display in the dialog body.
 fn show_fatal_error(error_msg: &str) {
     use std::os::windows::ffi::OsStrExt;
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -42,6 +57,11 @@ fn show_fatal_error(error_msg: &str) {
     }
 }
 
+/// The main entry point of the executable.
+///
+/// This function sets up a global panic hook to catch and display unhandled panics
+/// using a native Windows message box. After configuring the panic hook, it calls
+/// the `dispatch` function to handle the actual application logic based on the run mode.
 fn main() {
     // Register panic hook to show a dialog when the application crashes
     std::panic::set_hook(Box::new(|info| {
@@ -77,6 +97,14 @@ fn main() {
     }
 }
 
+/// Dispatches the execution flow based on parsed command-line arguments.
+///
+/// This function determines the application's run mode:
+/// - `ConsoleWorker`: Runs the detached debug console worker process.
+/// - `SettingsUi`: Launches the XAML-based settings interface.
+/// - `BackgroundApp`: Starts the main background taskbar switcher engine.
+///
+/// It also handles single-instance enforcement, logger initialization, and DPI awareness.
 fn dispatch() -> anyhow::Result<()> {
     let args = cli::parse_args();
 

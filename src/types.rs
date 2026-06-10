@@ -1,32 +1,32 @@
-//! Kiểu dữ liệu dùng chung - chỉ chứa data structures thuần, không logic.
+//! Shared data types - contains purely data structures, no logic.
 //!
-//! File này không import từ bất kỳ module nào khác trong project.
-//! Mọi module khác import từ đây -> không có circular dependency.
+//! This file does not import from any other module in the project.
+//! All other modules import from here -> no circular dependency.
 
 use windows::Win32::Foundation::{HWND, RECT};
 
-/// Taskbar button trên Windows 11 XAML taskbar, đọc từ UI Automation.
+/// Taskbar button on the Windows 11 XAML taskbar, read from UI Automation.
 ///
-/// Không có HWND riêng vì XAML elements không phải Win32 windows.
+/// It does not have a separate HWND because XAML elements are not Win32 windows.
 #[derive(Debug, Clone)]
 pub struct TaskbarButton {
-    /// Tên hiển thị của button (VD: "Chrome", "Edge - 3 running windows")
+    /// The display name of the button (e.g., "Chrome", "Edge - 3 running windows")
     pub name: String,
 
-    /// Vị trí và kích thước trên màn hình (pixel)
+    /// Position and size on the screen (in pixels)
     pub rect: RECT,
 
-    /// PID của process sở hữu button (thường là explorer.exe trên Win11)
+    /// PID of the process owning the button (usually explorer.exe on Win11)
     pub process_id: i32,
 
-    /// Automation ID từ UIA, 99% nó là AppUserModelID
+    /// Automation ID from UIA, which is the AppUserModelID 99% of the time
     pub automation_id: Option<String>,
 }
 
-/// Cửa sổ visible trên desktop, dùng để matching button ↔ window.
+/// Visible window on the desktop, used for matching buttons to windows.
 #[derive(Debug, Clone)]
 pub struct WindowInfo {
-    /// Handle của cửa sổ (HWND)
+    /// Window handle (HWND)
     pub hwnd: HWND,
 
     /// Window title
@@ -35,21 +35,21 @@ pub struct WindowInfo {
     /// Process ID
     pub process_id: u32,
 
-    /// Vị trí và kích thước
+    /// Position and size
     pub rect: RECT,
 
-    /// Tên file thực thi (VD: "chrome.exe")
+    /// Executable file name (e.g., "chrome.exe")
     pub process_name: String,
 }
 
-/// Một window target trong danh sách cycle.
-/// Mỗi entry tương ứng với 1 window cụ thể (HWND), không phải 1 taskbar button.
+/// A target window in the cycle list.
+/// Each entry corresponds to a specific window (HWND), not a taskbar button.
 #[derive(Debug, Clone)]
 pub struct TargetWindow {
-    /// Tên hiển thị (window title)
+    /// Display name (window title)
     pub name: String,
-    /// HWND của window cần activate
+    /// HWND of the window to activate
     pub hwnd: HWND,
-    /// Có thuộc grouped button không
+    /// Whether it belongs to a grouped button
     pub is_grouped: bool,
 }

@@ -1,33 +1,33 @@
-//! Chứa định nghĩa component `setting_item`, một block cài đặt có khả năng mở rộng (Expander) hoặc
-//! đứng độc lập.
+//! Contains the definition of the `setting_item` component, a settings block that can be expandable (Expander) or
+//! standalone.
 
 use windows_reactor::*;
 
-/// Hàm tiện ích để hiển thị các biểu tượng (icon) chuẩn của Windows (Segoe Fluent Icons).
+/// Utility function to display standard Windows icons (Segoe Fluent Icons).
 pub fn font_icon(character: char) -> TextBlock {
     text_block(character.to_string()).font_family("Segoe Fluent Icons")
 }
 
-/// Các thuộc tính cấu hình cho một mục cài đặt (`setting_item`)
+/// Configuration properties for a setting item (`setting_item`)
 #[derive(Clone, PartialEq)]
 pub struct SettingItemProps {
-    /// Biểu tượng của mục cài đặt (nếu có)
+    /// Icon for the setting item (if any)
     pub icon: Option<char>,
-    /// Tiêu đề chính
+    /// Main title
     pub title: Option<String>,
-    /// Mô tả chi tiết phụ cho tiêu đề (hiển thị mờ và nhỏ hơn ở dưới)
+    /// Detailed sub-description for the title (displayed dimmer and smaller below)
     pub description: Option<String>,
-    /// Element tương tác ở góc phải (VD: ToggleSwitch, Button)
+    /// Interactive element in the right corner (e.g., ToggleSwitch, Button)
     pub action: Option<Element>,
-    /// Danh sách các mục con. Nếu có, thẻ cài đặt này sẽ biến thành dạng Expander (có thể xổ xuống)
+    /// List of child items. If present, this setting card will turn into an Expander (can drop down)
     pub children: Option<Vec<SettingItemProps>>,
-    /// Nếu true, phần tử children sẽ luôn được hiển thị mà không có icon Chevron để thu gọn
+    /// If true, the children element will always be displayed without the Chevron icon to collapse
     pub always_expand: bool,
-    /// Cho phép hiển thị setting_item này ở trạng thái có thể tương tác hay không.
+    /// Allows this setting_item to be displayed in an interactive state or not.
     pub enabled: bool,
 }
 
-/// Nhận `action_element` từ ngoài vào để tránh việc phải clone toàn bộ `SettingItemProps`
+/// Takes `action_element` from the outside to avoid having to clone the entire `SettingItemProps`
 fn render_inner_layout(
     props: &SettingItemProps,
     action_element: Element,
@@ -52,7 +52,7 @@ fn render_inner_layout(
         ..Default::default()
     });
 
-    // Gom nhóm các thuộc tính phụ thuộc vào icon để tính toán 1 lần
+    // Group properties dependent on the icon to calculate once
     let (icon_el, icon_col_width, content_margin_left) = match props.icon {
         Some(character) => (
             Into::<Element>::into(font_icon(character).font_size(18.0))
@@ -97,11 +97,11 @@ fn render_inner_layout(
     .into()
 }
 
-/// Element gốc cho một item cài đặt.
+/// Root element for a setting item.
 ///
-/// Nếu `props.children` tồn tại, component sẽ render một cấu trúc `Expander` tuỳ chỉnh
-/// có khả năng xổ xuống (slide down animation) bằng cách kết hợp `ScrollViewer` và `LayoutAnimation`.
-/// Nếu không, nó sẽ trả về một `Border` tĩnh chứa cấu hình.
+/// If `props.children` exists, the component will render a custom `Expander` structure
+/// capable of dropping down (slide down animation) by combining `ScrollViewer` and `LayoutAnimation`.
+/// Otherwise, it will return a static `Border` containing the configuration.
 pub fn setting_item(props: &SettingItemProps, cx: &mut RenderCx) -> Element {
     let (is_expanded, set_expanded) = cx.use_state(props.always_expand);
 

@@ -1,7 +1,7 @@
-//! Event module - quản lý WinEvent hook và UIA StructureChanged event.
+//! Event module - manages WinEvent hooks and UI Automation StructureChanged events.
 //!
-//! WinEvent: theo dõi EVENT_OBJECT_SHOW để uncombine cửa sổ mới.
-//! UIA: theo dõi StructureChanged để invalidate button cache.
+//! WinEvent: monitors `EVENT_OBJECT_SHOW` to uncombine newly created windows.
+//! UIA: monitors `StructureChanged` to invalidate the taskbar button cache.
 
 mod uia;
 mod winevent;

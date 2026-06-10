@@ -1,3 +1,8 @@
+//! Manages the application's auto-start behavior on Windows.
+//!
+//! This module interacts with the Windows Registry (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`)
+//! to check, enable, or disable the application from launching automatically at user login.
+
 use std::env;
 use std::os::windows::ffi::OsStrExt;
 use windows::core::{w, PCWSTR};
@@ -10,6 +15,10 @@ use windows::Win32::System::Registry::{
 const APP_NAME: PCWSTR = w!("WinGlide");
 const REG_RUN_PATH: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
 
+/// Checks if the application is currently configured to start automatically on login.
+///
+/// Returns `true` if the registry key exists and contains a value for this application,
+/// otherwise returns `false`.
 pub fn is_autostart_enabled() -> bool {
     unsafe {
         let mut hkey = HKEY::default();
@@ -43,6 +52,16 @@ pub fn is_autostart_enabled() -> bool {
     }
 }
 
+/// Enables or disables the auto-start functionality.
+///
+/// # Arguments
+///
+/// * `enabled` - If `true`, adds the application executable path to the registry run key.
+///   If `false`, removes the application from the registry run key.
+///
+/// # Errors
+///
+/// Returns an error if the registry key cannot be opened or modified.
 pub fn set_autostart(enabled: bool) -> anyhow::Result<()> {
     unsafe {
         let mut hkey = HKEY::default();

@@ -55,14 +55,13 @@ pub fn render_hotkey_button(
     }
 }
 
-/// Bắt phím nóng từ người dùng thông qua Global Keyboard Hook (WH_KEYBOARD_LL)
-/// Ưu điểm: Chặn được phím (Swallow key) để các app khác (hoặc app ngầm) không bị kích hoạt ngoài
-/// ý muốn.
+/// Captures hotkeys from the user via a Global Keyboard Hook (WH_KEYBOARD_LL).
+/// Advantage: Allows swallowing the key so other apps (or background apps) aren't triggered unintentionally.
 pub fn capture_hotkey<F>(on_captured: F)
 where
     F: FnOnce(Option<(u32, u32)>) + 'static,
 {
-    // Hủy hook cũ nếu có
+    // Cancel the old hook if it exists
     HOOK_HANDLE.with(|h| {
         if let Some(hook) = h.borrow_mut().take() {
             let _ = unsafe { UnhookWindowsHookEx(hook) };
@@ -73,7 +72,7 @@ where
         *cb.borrow_mut() = Some(Box::new(on_captured));
     });
 
-    // Lấy trạng thái Modifier hiện tại phòng trường hợp người dùng đang giữ phím
+    // Retrieve the current Modifier state in case the user is holding down keys
     MODIFIERS_STATE.with(|m| {
         let mut mods = 0;
         if unsafe { GetAsyncKeyState(VK_CONTROL.0 as i32) } as u16 & 0x8000 != 0 {
@@ -128,22 +127,22 @@ unsafe extern "system" fn hook_proc(n_code: i32, w_param: WPARAM, l_param: LPARA
             }
 
             if mod_flag != 0 {
-                // Cập nhật trạng thái Modifier
+                // Update the Modifier state
                 MODIFIERS_STATE.with(|m| *m.borrow_mut() |= mod_flag);
-                return LRESULT(1); // Chặn phím
+                return LRESULT(1); // Swallow the key
             } else {
-                // Phím bình thường
+                // Normal key
                 let current_mods = MODIFIERS_STATE.with(|m| *m.borrow());
                 if current_mods != 0 {
                     finish_capture(Some((current_mods, vk)));
                 }
-                return LRESULT(1); // Chặn phím
+                return LRESULT(1); // Swallow the key
             }
         } else if msg == WM_KEYUP || msg == WM_SYSKEYUP {
             if mod_flag != 0 {
                 MODIFIERS_STATE.with(|m| *m.borrow_mut() &= !mod_flag);
             }
-            return LRESULT(1); // Chặn sự kiện nhả phím
+            return LRESULT(1); // Swallow the key release event
         }
     }
     CallNextHookEx(None, n_code, w_param, l_param)
@@ -163,7 +162,7 @@ fn finish_capture(result: Option<(u32, u32)>) {
     });
 }
 
-/// Chuyển đổi mã VK và Modifier thành chuỗi hiển thị
+/// Converts the VK code and Modifiers into a displayable string
 pub fn format_hotkey(modifiers: u32, vk: u32) -> String {
     let mut parts = Vec::new();
     if modifiers & MOD_WIN.0 != 0 {

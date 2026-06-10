@@ -1,9 +1,9 @@
-//! Quản lý khay hệ thống (System Tray Icon) thông qua API `Shell_NotifyIconW`.
+//! System Tray Icon management via the `Shell_NotifyIconW` API.
 //!
-//! Module này chịu trách nhiệm hiển thị và quản lý biểu tượng của ứng dụng dưới khay hệ thống
-//! Windows (System Tray)
+//! This module is responsible for displaying and managing the application's icon in the Windows
+//! System Tray.
 //!
-//! Pattern triển khai được tham khảo từ [window-switcher](https://github.com/sigoden/window-switcher/blob/main/src/trayicon.rs).
+//! Implementation pattern is referenced from [window-switcher](https://github.com/sigoden/window-switcher/blob/main/src/trayicon.rs).
 
 use tracing::debug;
 use windows::core::{w, PCWSTR};
@@ -24,26 +24,26 @@ const TEXT_SHOW_CONSOLE: PCWSTR = w!("Debug Console");
 const TEXT_SETTINGS: PCWSTR = w!("Settings...");
 const TEXT_EXIT: PCWSTR = w!("Exit");
 
-/// Quản lý vòng đời và hành vi của biểu tượng trên khay hệ thống Windows.
+/// Manages the lifecycle and behavior of the icon in the Windows system tray.
 pub struct TrayIcon {
-    /// Cấu trúc dữ liệu chứa thông tin cấu hình của biểu tượng khay hệ thống.
+    /// Data structure containing the configuration information of the system tray icon.
     data: NOTIFYICONDATAW,
 }
 
 impl TrayIcon {
-    /// Tạo mới một thực thể `TrayIcon` chưa liên kết với cửa sổ nào
+    /// Creates a new `TrayIcon` instance not yet associated with any window.
     ///
-    /// Nạp tệp biểu tượng từ assets và thiết lập tooltip mặc định
+    /// Loads the icon file from assets and sets the default tooltip.
     pub fn create() -> Self {
         let data = Self::create_nid();
         Self { data }
     }
 
-    /// Cập nhật icon dựa trên giao diện hệ thống hiện tại
+    /// Updates the icon based on the current system theme.
     pub fn update_theme(&mut self) {
         let new_hicon = Self::get_hicon();
-        // Không thể so sánh HICON trực tiếp bằng == vì nó không implement PartialEq
-        // Tuy nhiên, chúng ta chỉ cần update lại icon mới và hủy icon cũ
+        // Cannot compare HICON directly using == because it does not implement PartialEq.
+        // However, we just need to update the new icon and destroy the old one.
         let old_hicon = self.data.hIcon;
         self.data.hIcon = new_hicon;
         unsafe {
@@ -53,10 +53,10 @@ impl TrayIcon {
         debug!("TrayIcon theme updated (light_mode={})", is_light_theme());
     }
 
-    /// Đăng ký biểu tượng khay hệ thống với Windows Shell và liên kết với cửa sổ nhận tin nhắn
+    /// Registers the system tray icon with the Windows Shell and associates it with the message receiving window.
     ///
     /// # Errors
-    /// Trả về lỗi nếu hàm API `Shell_NotifyIconW` thất bại trong việc thêm biểu tượng (`NIM_ADD`)
+    /// Returns an error if the `Shell_NotifyIconW` API fails to add the icon (`NIM_ADD`).
     pub fn register(&mut self, hwnd: HWND) -> anyhow::Result<()> {
         self.data.hWnd = hwnd;
         unsafe {
@@ -68,26 +68,26 @@ impl TrayIcon {
         Ok(())
     }
 
-    /// Kiểm tra xem biểu tượng khay hệ thống hiện tại có đang tồn tại hay không
+    /// Checks if the current system tray icon exists.
     ///
-    /// Thực hiện bằng cách gửi lệnh chỉnh sửa (`NIM_MODIFY`). Trả về `true` nếu thành công
+    /// Performed by sending a modify command (`NIM_MODIFY`). Returns `true` if successful.
     #[allow(dead_code)]
     pub fn exists(&mut self) -> bool {
         unsafe { Shell_NotifyIconW(NIM_MODIFY, &self.data) }.as_bool()
     }
 
-    /// Hiển thị menu ngữ cảnh dạng Popup tại vị trí con trỏ chuột hiện tại.
+    /// Displays a Popup context menu at the current mouse cursor position.
     ///
-    /// # Chú ý quan trọng (Thread-safety)
-    /// Hàm này **bắt buộc phải được gọi từ luồng WndProc** (cùng luồng STA quản lý cửa sổ ẩn nhận
-    /// tin nhắn). Nguyên nhân là do API `TrackPopupMenu` cần xử lý các tin nhắn `WM_COMMAND` một
-    /// cách đồng bộ.
+    /// # Important Note (Thread-safety)
+    /// This function **must be called from the WndProc thread** (the same STA thread managing the hidden message
+    /// window). The reason is that the `TrackPopupMenu` API needs to process `WM_COMMAND` messages
+    /// synchronously.
     pub fn show(&self, console_visible: bool) -> anyhow::Result<()> {
         let hwnd = self.data.hWnd;
         let mut cursor = POINT::default();
         unsafe {
-            // Đưa cửa sổ ẩn lên foreground để khi click ra ngoài menu, menu sẽ tự động đóng lại
-            // (bắt buộc theo tài liệu Win32).
+            // Bring the hidden window to the foreground so that when clicking outside the menu, the menu automatically closes
+            // (required by Win32 documentation).
             let _ = SetForegroundWindow(hwnd);
             GetCursorPos(&mut cursor)?;
             let hmenu = Self::create_menu(console_visible)?;
@@ -105,10 +105,10 @@ impl TrayIcon {
         Ok(())
     }
 
-    /// Đăng ký lại biểu tượng với khay hệ thống.
+    /// Reregisters the icon with the system tray.
     ///
-    /// Thường được gọi sau khi nhận được thông báo `WM_TASKBARCREATED` thông báo rằng Windows
-    /// Explorer (explorer.exe) vừa được khởi động lại và khay hệ thống đã bị xóa sạch trước đó.
+    /// Usually called after receiving the `WM_TASKBARCREATED` message notifying that Windows
+    /// Explorer (explorer.exe) has just restarted and the system tray was cleared beforehand.
     pub fn reregister(&mut self) -> anyhow::Result<()> {
         unsafe {
             Shell_NotifyIconW(NIM_ADD, &self.data)
@@ -134,7 +134,7 @@ impl TrayIcon {
         }
     }
 
-    /// Tạo và thiết lập thông tin cấu hình mặc định `NOTIFYICONDATAW` cho biểu tượng khay hệ thống
+    /// Creates and sets the default `NOTIFYICONDATAW` configuration information for the system tray icon.
     fn create_nid() -> NOTIFYICONDATAW {
         let hicon = Self::get_hicon();
 
@@ -152,13 +152,13 @@ impl TrayIcon {
         }
     }
 
-    /// Tạo một menu Popup chứa các tùy chọn cấu hình của ứng dụng.
+    /// Creates a Popup menu containing application configuration options.
     ///
-    /// Menu bao gồm:
-    /// - Tùy chọn "Debug Console"
-    /// - Tùy chọn "Settings..."
-    /// - Đường phân cách (Separator)
-    /// - Tùy chọn "Exit" để đóng ứng dụng
+    /// The menu includes:
+    /// - "Debug Console" option
+    /// - "Settings..." option
+    /// - Separator
+    /// - "Exit" option to close the application
     fn create_menu(console_visible: bool) -> anyhow::Result<HMENU> {
         unsafe {
             let hmenu = CreatePopupMenu()?;
@@ -189,7 +189,7 @@ impl TrayIcon {
     }
 }
 
-/// Khi thực thể `TrayIcon` bị hủy (Out of scope / Drop), tự động xóa biểu tượng khỏi khay hệ thống
+/// When the `TrayIcon` instance is destroyed (Out of scope / Drop), automatically remove the icon from the system tray.
 impl Drop for TrayIcon {
     fn drop(&mut self) {
         unsafe {

@@ -1,5 +1,5 @@
-//! Root UI module cho Settings application.
-//! Nơi khởi tạo cấu trúc layout chính bao gồm Header, các mục Settings, Logging và Footer.
+//! Root UI module for the Settings application.
+//! Initializes the main layout structure including Header, Settings items, Logging, and Footer.
 
 use crate::config::AppConfig;
 use crate::setting::hotkey_button;
@@ -17,7 +17,7 @@ use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows_core::w;
 use windows_reactor::*;
 
-/// Gửi tín hiệu tải lại cấu hình tới tiến trình chạy ngầm
+/// Sends a signal to reload the configuration to the background process
 fn send_reload_signal() {
     unsafe {
         if let Ok(hwnd) = windows::Win32::UI::WindowsAndMessaging::FindWindowW(
@@ -54,8 +54,8 @@ fn send_restart_admin_signal() {
     }
 }
 
-/// Khung chính của ứng dụng cài đặt (Settings App).
-/// Gồm một luồng (`vstack`) chứa toàn bộ các khối nội dung, padding đều ra xung quanh.
+/// Main frame of the Settings App.
+/// Consists of a flow (`vstack`) containing all content blocks, padded evenly around.
 pub fn settings_app(cx: &mut RenderCx) -> Element {
     let content = vstack((
         header(),
@@ -71,16 +71,16 @@ pub fn settings_app(cx: &mut RenderCx) -> Element {
     scroll_viewer(content).into()
 }
 
-/// Khối Header hiển thị Tiêu đề và Mô tả chính của App.
+/// Header block displaying the main Title and Description of the App.
 fn header() -> Element {
     vstack((title("Settings"),)).spacing(12.0).into()
 }
 
-/// Phân vùng chứa các cài đặt liên quan đến Taskbar.
-/// Lưu ý: `cx: &mut RenderCx` được truyền trực tiếp xuống `setting_item` thay vì
-/// sử dụng wrapper `component(setting_item)`, nhằm đảm bảo việc Reconciler của
-/// `windows-reactor` đánh giá được đầy đủ sự thay đổi state, tránh lỗi skip render
-/// khi component bị bọc trong một `vstack` tĩnh.
+/// Section containing settings related to the Taskbar.
+/// Note: `cx: &mut RenderCx` is passed directly down to `setting_item` instead of
+/// using the `component(setting_item)` wrapper, to ensure the Reconciler of
+/// `windows-reactor` can fully evaluate state changes, preventing skip render errors
+/// when the component is wrapped in a static `vstack`.
 fn taskbar_settings(cx: &mut RenderCx) -> Element {
     let (config, set_config) = cx.use_state(AppConfig::load());
 
@@ -232,7 +232,7 @@ fn taskbar_settings(cx: &mut RenderCx) -> Element {
 fn virtual_desktop_settings(cx: &mut RenderCx) -> Element {
     let (config, set_config) = cx.use_state(AppConfig::load());
 
-    // Khởi tạo các cờ cho toggle buttons
+    // Initialize flags for toggle buttons
     let has_ctrl = config.jump_desktop_modifiers & MOD_CONTROL.0 != 0;
     let has_alt = config.jump_desktop_modifiers & MOD_ALT.0 != 0;
 
@@ -449,7 +449,7 @@ fn update_settings(cx: &mut RenderCx) -> Element {
     .into()
 }
 
-/// Khối Footer hiển thị thông tin tác giả và Repository.
+/// Footer block displaying author information and Repository.
 fn footer() -> Element {
     vstack((
         body_strong("About"),

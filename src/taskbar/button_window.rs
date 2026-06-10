@@ -1,4 +1,4 @@
-//! Ánh xạ taskbar button với window qua nhiều chiến lược: AUMID, PID, title, process name.
+//! Maps taskbar buttons to windows through multiple strategies: AUMID, PID, title, process name.
 
 use tracing::{debug, error};
 use windows::Win32::Foundation::HWND;
@@ -6,26 +6,26 @@ use windows::Win32::Foundation::HWND;
 use super::{explorer, window};
 use crate::types::{TaskbarButton, WindowInfo};
 
-/// Ánh xạ giữa taskbar buttons và visible windows.
+/// Mapping between taskbar buttons and visible windows.
 ///
-/// Khởi tạo 1 lần per cycle, dùng cho:
-/// - Tìm window(s) cho button (`find_window_by_button`, `find_windows_by_button`)
-/// - Tìm button index cho foreground window (`find_button_index_by_hwnd`)
+/// Initialized once per cycle, used for:
+/// - Finding window(s) for a button (`find_window_by_button`, `find_windows_by_button`)
+/// - Finding the button index for the foreground window (`find_button_index_by_hwnd`)
 pub(super) struct ButtonWindowMap<'a> {
     buttons: &'a [TaskbarButton],
     windows: &'a [WindowInfo],
 }
 
 impl<'a> ButtonWindowMap<'a> {
-    /// Tạo instance mới với danh sách buttons và windows hiện tại.
+    /// Creates a new instance with the current list of buttons and windows.
     pub(super) fn new(buttons: &'a [TaskbarButton], windows: &'a [WindowInfo]) -> Self {
         Self { buttons, windows }
     }
 
-    /// Tìm index của taskbar button tương ứng với target window.
+    /// Finds the index of the taskbar button corresponding to the target window.
     ///
-    /// Fast path: so khớp AUMID của window với button automation_id.
-    /// Slow path: reverse matching qua `find_windows_for_button` cho từng button.
+    /// Fast path: matches the window's AUMID with the button's automation_id.
+    /// Slow path: reverse matching via `find_windows_for_button` for each button.
     pub(super) fn find_button_index_by_hwnd(&self, target_hwnd: HWND) -> Option<usize> {
         let fg_info = self.windows.iter().find(|w| w.hwnd == target_hwnd);
         let fg_name = fg_info.map(|w| w.title.as_str()).unwrap_or("<unknown>");
@@ -67,22 +67,22 @@ impl<'a> ButtonWindowMap<'a> {
         None
     }
 
-    /// Tìm một window tương ứng với button. Dùng cho uncombine mode.
+    /// Finds a window corresponding to the button. Used for uncombine mode.
     pub(super) fn find_window_by_button(&self, button: &TaskbarButton) -> Option<WindowInfo> {
         self.match_windows_for_button(button).into_iter().next()
     }
 
-    /// Tìm tất cả windows tương ứng với button. Dùng cho combine mode (grouped buttons).
+    /// Finds all windows corresponding to the button. Used for combine mode (grouped buttons).
     pub(super) fn find_windows_by_button(&self, button: &TaskbarButton) -> Vec<WindowInfo> {
         self.match_windows_for_button(button)
     }
 
-    /// Core matching logic: ánh xạ button -> window(s) qua 4 chiến lược.
+    /// Core matching logic: maps button -> window(s) through 4 strategies.
     ///
-    /// 1. **AppUserModelID** - khớp `button.automation_id` với `window.AppUserModelID`
-    /// 2. **PID** - nếu button PID là app thực (không phải explorer)
-    /// 3. **Title** - fuzzy match sau khi `clean_button_name`
-    /// 4. **Process name** - khớp tên file thực thi với button name
+    /// 1. **AppUserModelID** - matches `button.automation_id` with `window.AppUserModelID`
+    /// 2. **PID** - if button PID is a real app (not explorer)
+    /// 3. **Title** - fuzzy match after `clean_button_name`
+    /// 4. **Process name** - matches executable file name with button name
     fn match_windows_for_button(&self, button: &TaskbarButton) -> Vec<WindowInfo> {
         // Strategy 1: AppUserModelID
         if let Some(auto_id) = &button.automation_id {

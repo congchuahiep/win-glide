@@ -1,4 +1,4 @@
-//! Kích hoạt cửa sổ, đưa window lên foreground bằng SetForegroundWindow và AttachThreadInput
+//! Activates a window, bringing it to the foreground using SetForegroundWindow and AttachThreadInput
 //! fallback.
 
 use tracing::instrument;
@@ -11,10 +11,10 @@ use windows::Win32::{
     },
 };
 
-/// Đưa target window lên foreground.
+/// Brings the target window to the foreground.
 ///
-/// Thử SetForegroundWindow trước, nếu fail thì dùng AttachThreadInput để attach foreground thread
-/// vào current thread.
+/// Tries SetForegroundWindow first, if it fails, uses AttachThreadInput to attach the foreground thread
+/// to the current thread.
 #[instrument(level = "debug", skip_all)]
 pub(super) unsafe fn force_activate(target: HWND) -> bool {
     let foreground = GetForegroundWindow();

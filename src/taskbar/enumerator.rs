@@ -1,24 +1,24 @@
-//! Liệt kê các nút (buttons) trên Windows 11 taskbar theo đúng thứ tự từ trái sang phải.
+//! Enumerates buttons on the Windows 11 taskbar in correct order from left to right.
 //!
-//! # Tại sao không dùng `FindWindow` trực tiếp?
+//! # Why not use `FindWindow` directly?
 //!
-//! Trên Windows 10, taskbar buttons là các `ToolbarWindow32`, một control tiêu chuẩn của Windows.
-//! Ta có thể dùng `TB_GETBUTTON` message để lấy thông tin trực tiếp. Nhưng trên **Windows 11**,
-//! Microsoft viết lại taskbar bằng **XAML** (UWP/WinRT). Các nút không còn là `HWND` riêng biệt
-//! nữa, chúng là **XAML elements** bên trong `Windows.UI.Composition.DesktopWindowContentBridge`.
+//! On Windows 10, taskbar buttons are `ToolbarWindow32`, a standard Windows control.
+//! We can use the `TB_GETBUTTON` message to get information directly. But on **Windows 11**,
+//! Microsoft rewrote the taskbar using **XAML** (UWP/WinRT). Buttons are no longer distinct `HWND`s,
+//! they are **XAML elements** inside `Windows.UI.Composition.DesktopWindowContentBridge`.
 //!
-//! Do đó ta phải dùng **UI Automation (UIAutomation)**, một COM-based API cho phép truy cập UI
-//! elements bất kể underlying technology (Win32, XAML, WebView, etc.).
+//! Therefore we must use **UI Automation (UIAutomation)**, a COM-based API that allows accessing UI
+//! elements regardless of the underlying technology (Win32, XAML, WebView, etc.).
 //!
-//! # Khái niệm quan trọng: IUIAutomation
+//! # Key concept: IUIAutomation
 //!
-//! **IUIAutomation** giống như một "máy quét màn hình" cho người khiếm thị. Nó mô tả mọi thứ trên màn hình thành một **cây phân cấp** (tree):
+//! **IUIAutomation** is like a "screen reader" for the visually impaired. It describes everything on the screen as a **hierarchy tree**:
 //!
 //! ```text
 //! Root (Desktop)
 //!  └── Shell_TrayWnd (Taskbar)
 //!       └── Windows.UI.Composition.DesktopWindowContentBridge
-//!            └── Taskbar.TaskListButtonAutomationPeer  ← đây là các nút!
+//!            └── Taskbar.TaskListButtonAutomationPeer  ← these are the buttons!
 //!            └── Taskbar.TaskListButtonAutomationPeer
 //!            └── ...
 //! ```
@@ -56,68 +56,68 @@ use crate::event::UiaEventHook;
 use crate::types::{TargetWindow, TaskbarButton};
 use crate::utils::truncate;
 
-/// Cache TTL: 1 giây. Nếu không có WinEvent invalidate, cache tự expire sau 2s.
+/// Cache TTL: 1 second. If no WinEvent invalidates it, the cache auto-expires after 1s.
 const CACHE_TTL_SECS: f64 = 1.0;
 
-/// Button cache với timestamp.
+/// Button cache with timestamp.
 struct ButtonCache {
     buttons: Vec<TaskbarButton>,
     created_at: Instant,
 }
 
-/// Hướng cycle: trái hoặc phải trên taskbar.
+/// Cycle direction: left or right on the taskbar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CycleDirection {
     Forward,
     Backward,
 }
 
-/// Liệt kê các taskbar buttons trên Windows 11.
+/// Enumerates taskbar buttons on Windows 11.
 pub struct TaskbarEnumerator {
-    /// COM interface IUIAutomation, "máy quét" UI.
+    /// COM interface IUIAutomation, UI "scanner".
     automation: IUIAutomation,
 
-    /// Cache button list để tránh re-enumerate mỗi lần bấm phím.
+    /// Caches the button list to avoid re-enumerating on every keystroke.
     ///
-    /// [`RefCell`] cho phép mutate từ `&self` methods (không cần `&mut self`).
-    /// Cache bị invalidate bởi UIA event hoặc khi TTL (1 giây) hết hạn.
+    /// [`RefCell`] allows mutation from `&self` methods (no need for `&mut self`).
+    /// The cache is invalidated by UIA events or when TTL (1 second) expires.
     button_cache: RefCell<Option<ButtonCache>>,
 
-    /// Virtual Desktop ID của foreground window gần nhất.
+    /// Virtual Desktop ID of the most recent foreground window.
     ///
-    /// Dùng để phát hiện chuyển desktop, nếu ID thay đổi -> invalidate cache.
+    /// Used to detect desktop switching, if ID changes -> invalidate cache.
     last_desktop_id: RefCell<Option<windows::core::GUID>>,
 
-    /// Danh sách HWND của các taskbar window (cả chính và các taskbar của màn hình phụ).
+    /// List of HWNDs of the taskbar windows (both primary and secondary monitors' taskbars).
     taskbars: RefCell<Vec<HWND>>,
 
     /// UIA StructureChanged event hooks.
     uia_hooks: RefCell<Vec<UiaEventHook>>,
 
-    /// UIA StructureChanged event hook - tự subscribe/unsubscribe.
+    /// UIA StructureChanged event hook - auto subscribes/unsubscribes.
     ///
-    /// Khi explorer restart, [`Self::refresh_taskbar_hwnd`] sẽ drop old + create new.
+    /// Upon explorer restart, [`Self::refresh_taskbar_hwnd`] will drop the old and create a new one.
     uia_thread_id: Cell<u32>,
 
-    /// Index của button đang active lần cuối cùng.
+    /// Index of the last active button.
     last_active_index: Cell<Option<usize>>,
 }
 
 /// Life cycle implementation
 impl TaskbarEnumerator {
-    /// Tạo enumerator mới và init COM (STA apartment).
+    /// Creates a new enumerator and initializes COM (STA apartment).
     ///
     /// # COM Apartments
     ///
-    /// Windows COM có 2 loại apartment:
-    /// - **STA (Single-Threaded Apartment)**: Mỗi thread sở hữu message queue riêng, dùng
+    /// Windows COM has 2 apartment types:
+    /// - **STA (Single-Threaded Apartment)**: Each thread has its own message queue, using
     /// `GetMessageW`.
-    /// - **MTA (Multi-Threaded Apartment)**: Không có message queue, dùng
+    /// - **MTA (Multi-Threaded Apartment)**: No message queue, using
     /// `CoWaitForMultipleObjects`.
     ///
-    /// IUIAutomation hoạt động tốt với cả 2, nhưng STA được khuyến nghị cho đơn giản.
+    /// IUIAutomation works well with both, but STA is recommended for simplicity.
     ///
-    /// # Ví dụ
+    /// # Example
     ///
     /// ```rust,ignore
     /// let enumerator = TaskbarEnumerator::new()?;
@@ -133,7 +133,7 @@ impl TaskbarEnumerator {
             let taskbars = Self::get_all_taskbar_hwnds();
             if taskbars.is_empty() {
                 anyhow::bail!(
-                    "No taskbar found, có thể đang chạy portable mode hoặc taskbar bị disabled"
+                    "No taskbar found, possibly running in portable mode or the taskbar is disabled"
                 )
             }
 
@@ -149,10 +149,10 @@ impl TaskbarEnumerator {
         }
     }
 
-    /// Đăng ký UIA StructureChanged event handler trên taskbar elements.
+    /// Registers UIA StructureChanged event handler on taskbar elements.
     ///
-    /// Gọi 1 lần từ `App::run()`. Sau explorer restart, [`Self::refresh_taskbar_hwnd`] tự động
-    /// re-subscribe.
+    /// Called once from `App::run()`. After explorer restarts, [`Self::refresh_taskbar_hwnd`] automatically
+    /// re-subscribes.
     pub fn install_uia_hook(&self, main_thread_id: u32) -> anyhow::Result<()> {
         self.uia_thread_id.set(main_thread_id);
         let taskbars = self.taskbars.borrow();
@@ -168,12 +168,12 @@ impl TaskbarEnumerator {
         Ok(())
     }
 
-    /// Tự phục hồi sau khi explorer.exe crash và restart.
+    /// Self-recovers after explorer.exe crashes and restarts.
     ///
-    /// NOTE: Logic này được gọi tại [`Self::enumerate_buttons`], nghe có vẻ không đúng lắm vì đáng
-    /// lẽ ra phương thức này phải gọi khi sự kiện explorer restart xảy ra. Lý do không chọn phương
-    /// pháp bắt sự kiện đó là vì cách đó hơi rườm rà, nhưng mai sau vẫn nên bắt sự kiện hơn thay vì
-    /// tự gọi thủ công
+    /// NOTE: This logic is called at [`Self::enumerate_buttons`], which might sound incorrect because
+    /// this method should ideally be called when the explorer restart event occurs. The reason for not
+    /// choosing that approach is because it's a bit cumbersome, but in the future it's still better to catch the event
+    /// instead of calling it manually.
     pub fn refresh_taskbar_hwnd(&self) -> anyhow::Result<()> {
         let taskbars = Self::get_all_taskbar_hwnds();
         if taskbars.is_empty() {
@@ -201,7 +201,7 @@ impl TaskbarEnumerator {
 
 /// Core implementation
 impl TaskbarEnumerator {
-    /// Cycle đến window kế tiếp trên taskbar và activate window.
+    /// Cycles to the next window on the taskbar and activates the window.
     ///
     /// # Errors
     ///
@@ -234,10 +234,10 @@ impl TaskbarEnumerator {
         Ok(())
     }
 
-    /// Tìm window kế tiếp bên trái/phải của `source` trên taskbar.
+    /// Finds the next window to the left/right of `source` on the taskbar.
     ///
-    /// Luồng: enumerate buttons -> find active index -> compute next index ->
-    /// match target button với window (qua `ButtonWindowMap`) -> return target.
+    /// Flow: enumerate buttons -> find active index -> compute next index ->
+    /// match target button with window (via `ButtonWindowMap`) -> return target.
     #[instrument(level = "debug", skip_all)]
     fn find_neighbor_window(
         &self,
@@ -303,7 +303,7 @@ impl TaskbarEnumerator {
         }
     }
 
-    /// Lấy tất cả HWND của các taskbar (chính và phụ).
+    /// Gets all HWNDs of taskbars (primary and secondary).
     fn get_all_taskbar_hwnds() -> Vec<HWND> {
         let mut hwnds = Vec::new();
         unsafe {
@@ -328,9 +328,9 @@ impl TaskbarEnumerator {
         hwnds
     }
 
-    /// Trả về taskbar buttons trên monitor hiện tại (chứa cursor hoặc foreground window).
+    /// Returns taskbar buttons on the current monitor (containing the cursor or foreground window).
     ///
-    /// Cache với TTL 1 giây, bị invalidate bởi UIA event hoặc desktop switch.
+    /// Cached with a 1-second TTL, invalidated by UIA events or desktop switches.
     pub fn enumerate_current_monitor_buttons(&self) -> anyhow::Result<Vec<TaskbarButton>> {
         if self.desktop_changed() {
             self.invalidate_cache();
@@ -376,7 +376,7 @@ impl TaskbarEnumerator {
         }
     }
 
-    /// Kiểm tra virtual desktop có thay đổi không qua `IVirtualDesktopManager::GetWindowDesktopId`.
+    /// Checks if the virtual desktop has changed via `IVirtualDesktopManager::GetWindowDesktopId`.
     fn desktop_changed(&self) -> bool {
         let fg = unsafe { GetForegroundWindow() };
         if fg.0.is_null() {
@@ -404,19 +404,19 @@ impl TaskbarEnumerator {
         changed
     }
 
-    /// Phát hiện lỗi `EVENT_E_ALL_SUBSCRIBERS_FAILED (0x80040201)` khi explorer restart.
+    /// Detects `EVENT_E_ALL_SUBSCRIBERS_FAILED (0x80040201)` error upon explorer restart.
     fn is_subscribers_failed(e: &anyhow::Error) -> bool {
         e.chain().any(|c| c.to_string().contains("0x80040201"))
     }
 
-    /// Liệt kê taskbar buttons của một taskbar HWND cụ thể qua UIA.
+    /// Enumerates taskbar buttons of a specific taskbar HWND via UIA.
     ///
-    /// Fallback: nếu `FindAllBuildCache` trả về rỗng, thử `enumerate_via_bridge_windows`.
-    /// Tự phục hồi nếu gặp `EVENT_E_ALL_SUBSCRIBERS_FAILED` (explorer restart).
+    /// Fallback: if `FindAllBuildCache` returns empty, tries `enumerate_via_bridge_windows`.
+    /// Self-recovers if `EVENT_E_ALL_SUBSCRIBERS_FAILED` (explorer restart) is encountered.
     #[instrument(level = "debug", skip_all)]
     unsafe fn enumerate_buttons(&self, target_taskbar: HWND) -> anyhow::Result<Vec<TaskbarButton>> {
-        /// Tạo CacheRequest batch 4 UIA properties (name, rect, PID, automation_id)
-        /// để chỉ cần 1 COM call thay vì 4 lần gọi riêng.
+        /// Creates a CacheRequest to batch 4 UIA properties (name, rect, PID, automation_id)
+        /// so it only takes 1 COM call instead of 4 separate calls.
         unsafe fn create_button_cache_request(
             automation: &IUIAutomation,
         ) -> anyhow::Result<IUIAutomationCacheRequest> {
@@ -484,10 +484,10 @@ impl TaskbarEnumerator {
         }
     }
 
-    /// Trích xuất thông tin từ UIA element array qua cached properties.
+    /// Extracts information from the UIA element array via cached properties.
     ///
-    /// Dùng `Cached*` methods (không cần COM call riêng) vì properties đã được
-    /// batch-read qua `CacheRequest` trong `FindAllBuildCache`.
+    /// Uses `Cached*` methods (no separate COM calls needed) because properties were already
+    /// batch-read via `CacheRequest` in `FindAllBuildCache`.
     #[instrument(level = "debug", skip_all)]
     unsafe fn collect_buttons(
         &self,
@@ -526,10 +526,10 @@ impl TaskbarEnumerator {
         Ok(())
     }
 
-    /// Fallback: tìm buttons qua `DesktopWindowContentBridge` child windows của taskbar.
+    /// Fallback: finds buttons via `DesktopWindowContentBridge` child windows of the taskbar.
     ///
-    /// Win11 có thể render buttons bên trong bridge window (XAML island)
-    /// thay vì trực tiếp dưới Shell_TrayWnd.
+    /// Win11 can render buttons inside the bridge window (XAML island)
+    /// instead of directly under Shell_TrayWnd.
     #[instrument(level = "debug", skip_all)]
     unsafe fn enumerate_via_bridge_windows(
         &self,
@@ -574,7 +574,7 @@ impl TaskbarEnumerator {
 
 /// Cached implementation
 impl TaskbarEnumerator {
-    /// Invalidate button cache - gọi khi nhận UIA StructureChanged event.
+    /// Invalidates button cache - called upon receiving UIA StructureChanged event.
     pub fn invalidate_cache(&self) {
         let mut cache = self.button_cache.borrow_mut();
         if cache.is_some() {

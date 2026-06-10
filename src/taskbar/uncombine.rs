@@ -1,21 +1,19 @@
-//! Quản lý việc tách (uncombine) các taskbar button.
+//! Manages uncombining taskbar buttons.
 //!
-//! Trên Windows, taskbar mặc định gộp (`combine`) nhiều cửa sổ cùng app vào một button duy nhất.
-//! Cơ chế này dựa trên **AppUserModelID (AUMID)**: các cửa sổ có cùng AUMID được Windows gộp vào
-//! chung một group.
+//! On Windows, the taskbar defaults to grouping (`combine`) multiple windows of the same app into a single button.
+//! This mechanism is based on the **AppUserModelID (AUMID)**: windows with the same AUMID are grouped by Windows.
 //!
-//! `UncombineManager` gán cho mỗi cửa sổ một AUMID **duy nhất** dạng `TaskbarSwitcher_<HWND>`,
-//! khiến Windows coi mỗi cửa sổ là một app riêng biệt -> mỗi cửa sổ có taskbar button riêng.
+//! `UncombineManager` assigns each window a **unique** AUMID in the format `TaskbarSwitcher_<HWND>`,
+//! making Windows treat each window as a separate app -> each window gets its own taskbar button.
 //!
-//! AUMID gốc của mỗi cửa sổ được lưu lại để có thể **khôi phục** khi thoát app (tránh làm hỏng
-//! trạng thái hệ thống).
+//! The original AUMID of each window is saved so it can be **restored** upon app exit (to avoid corrupting system state).
 //!
-//! # Luồng hoạt động
+//! # Workflow
 //!
 //! ```text
-//! 1. App start -> uncombine_all() duyệt tất cả window, set AUMID riêng
-//! 2. WinEvent hook -> phát hiện window mới -> uncombine_one(hwnd)
-//! 3. App exit (Ctrl+C) -> restore_all() khôi phục AUMID gốc
+//! 1. App start -> uncombine_all() iterates all windows, sets unique AUMID
+//! 2. WinEvent hook -> detects new window -> uncombine_one(hwnd)
+//! 3. App exit (Ctrl+C) -> restore_all() restores original AUMID
 //! ```
 
 use std::collections::HashMap;
@@ -32,33 +30,33 @@ use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyS
 use super::window::{find_visible_windows, get_app_user_model_id};
 use crate::utils::truncate;
 
-/// Quản lý uncombine: lưu AUMID gốc và set AUMID riêng cho từng cửa sổ.
+/// Manages uncombine: saves original AUMID and sets unique AUMID for each window.
 ///
 /// # Thread safety
 ///
-/// `original_aumids` được bảo vệ bởi `Mutex` vì:
-/// - Main thread gọi `uncombine_all()` / `uncombine_one()` / `restore_all()`
-/// - WinEvent callback thread gọi `is_tracked()` để filter trước khi post message
+/// `original_aumids` is protected by `Mutex` because:
+/// - Main thread calls `uncombine_all()` / `uncombine_one()` / `restore_all()`
+/// - WinEvent callback thread calls `is_tracked()` to filter before posting message
 pub struct UncombineManager {
-    /// `hwnd_val (isize) -> AUMID gốc`.
+    /// `hwnd_val (isize) -> original AUMID`.
     ///
-    /// - `Some("App.Aumid")` - cửa sổ có AUMID gốc
-    /// - `None` - cửa sổ vốn không có AUMID (VD: console window)
+    /// - `Some("App.Aumid")` - window has an original AUMID
+    /// - `None` - window didn't have an AUMID (e.g., console window)
     original_aumids: Mutex<HashMap<isize, Option<String>>>,
 }
 
 impl UncombineManager {
-    /// Tạo instance mới với map rỗng.
+    /// Creates a new instance with an empty map.
     pub fn new() -> Self {
         Self {
             original_aumids: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Kiểm tra cửa sổ đã được theo dõi bởi uncombine chưa.
+    /// Checks if a window is already tracked by uncombine.
     ///
-    /// Dùng tromg WinEvent callback để filter nhanh trước khi post messag tránh gửi message vô ích
-    /// cho cửa sổ đã uncombine.
+    /// Used in WinEvent callback for quick filtering before posting message to avoid sending useless
+    /// messages for already uncombined windows.
     pub fn is_tracked(&self, hwnd: HWND) -> bool {
         self.original_aumids
             .lock()
@@ -66,10 +64,10 @@ impl UncombineManager {
             .contains_key(&(hwnd.0 as isize))
     }
 
-    /// Uncombine **tất cả** cửa sổ đang visible trên desktop.
+    /// Uncombines **all** visible windows on the desktop.
     ///
-    /// Chỉ uncombine khi phát hiện có từ 2 cửa sổ trở lên thuộc cùng một app (cùng AUMID hoặc tên tiến trình).
-    /// Cửa sổ đầu tiên (anchor) sẽ giữ nguyên AUMID để không bị mất icon.
+    /// Only uncombines when 2 or more windows of the same app (same AUMID or process name) are detected.
+    /// The first window (anchor) will keep its original AUMID to not lose its icon.
     #[instrument(level = "debug", skip_all)]
     pub fn uncombine_all(&self) {
         let windows = find_visible_windows();
@@ -126,9 +124,9 @@ impl UncombineManager {
         }
     }
 
-    /// Uncombine **một** cửa sổ mới xuất hiện.
+    /// Uncombines a **single** new window.
     ///
-    /// Chỉ uncombine nếu đã có một cửa sổ khác của cùng app đang hiển thị (anchor window).
+    /// Only uncombines if there is another window of the same app already visible (anchor window).
     #[instrument(level = "debug", skip_all)]
     pub fn uncombine_one(&self, hwnd: HWND, on_success: impl FnOnce()) {
         let hwnd_val = hwnd.0 as isize;
@@ -187,11 +185,11 @@ impl UncombineManager {
         }
     }
 
-    /// Khôi phục **tất cả** AUMID gốc.
+    /// Restores **all** original AUMIDs.
     ///
-    /// Duyệt toàn bộ map, với mỗi cửa sổ:
-    /// - Nếu có AUMID gốc: set lại AUMID gốc
-    /// - Nếu `None` (vốn không có AUMID): xóa AUMID property (gán VT_EMPTY)
+    /// Iterates the entire map, for each window:
+    /// - If it had an original AUMID: restores it
+    /// - If `None` (no original AUMID): clears the AUMID property (assigns VT_EMPTY)
     #[instrument(level = "debug", skip_all)]
     pub fn restore_all(&self) {
         debug!("Restoring original AppUserModelIDs");
@@ -215,7 +213,7 @@ impl Drop for UncombineManager {
     }
 }
 
-/// Set AppUserModelID cho một cửa sổ.
+/// Sets the AppUserModelID for a window.
 fn set_aumid(hwnd: HWND, aumid: Option<&str>) -> Result<(), windows::core::Error> {
     unsafe {
         let store: IPropertyStore = SHGetPropertyStoreForWindow(hwnd)?;
