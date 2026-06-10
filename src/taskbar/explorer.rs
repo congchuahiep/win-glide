@@ -1,8 +1,9 @@
 //! Cache PID của explorer.exe - dùng để phân biệt button của explorer
 //! với button của app thực trong matching logic.
 
+use std::os::windows::process::CommandExt;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-
 use tracing::debug;
 
 /// Lấy PID của explorer.exe, cache bằng atomic.
@@ -10,14 +11,13 @@ use tracing::debug;
 /// Cache valid đến khi [`invalidate_explorer_pid_cache`] được gọi
 /// (từ `TaskbarEnumerator::refresh_taskbar_hwnd` khi explorer restart).
 pub(super) fn get_explorer_pid() -> u32 {
-    use std::process::Command;
-
     if EXPLORER_PID_VALID.load(Ordering::Relaxed) {
         return EXPLORER_PID_CACHE.load(Ordering::Relaxed);
     }
 
     let pid = if let Ok(output) = Command::new("tasklist")
         .args(["/FI", "IMAGENAME eq explorer.exe", "/FO", "CSV", "/NH"])
+        .creation_flags(0x08000000)
         .output()
     {
         let stdout = String::from_utf8_lossy(&output.stdout);
