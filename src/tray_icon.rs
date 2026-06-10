@@ -11,7 +11,10 @@ use windows::Win32::Foundation::*;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-const ICON_BYTES: &[u8] = include_bytes!("../assets/icon.ico");
+use crate::utils::is_light_theme;
+
+const ICON_LIGHT_BYTES: &[u8] = include_bytes!("../assets/icon-light.ico");
+const ICON_DARK_BYTES: &[u8] = include_bytes!("../assets/icon-dark.ico");
 
 pub const IDM_EXIT: u32 = 1;
 pub const IDM_SHOW_CONSOLE: u32 = 3;
@@ -34,6 +37,20 @@ impl TrayIcon {
     pub fn create() -> Self {
         let data = Self::create_nid();
         Self { data }
+    }
+
+    /// Cập nhật icon dựa trên giao diện hệ thống hiện tại
+    pub fn update_theme(&mut self) {
+        let new_hicon = Self::get_hicon();
+        // Không thể so sánh HICON trực tiếp bằng == vì nó không implement PartialEq
+        // Tuy nhiên, chúng ta chỉ cần update lại icon mới và hủy icon cũ
+        let old_hicon = self.data.hIcon;
+        self.data.hIcon = new_hicon;
+        unsafe {
+            let _ = Shell_NotifyIconW(NIM_MODIFY, &self.data);
+            let _ = DestroyIcon(old_hicon);
+        }
+        debug!("TrayIcon theme updated (light_mode={})", is_light_theme());
     }
 
     /// Đăng ký biểu tượng khay hệ thống với Windows Shell và liên kết với cửa sổ nhận tin nhắn
@@ -102,21 +119,24 @@ impl TrayIcon {
         Ok(())
     }
 
-    /// Tạo và thiết lập thông tin cấu hình mặc định `NOTIFYICONDATAW` cho biểu tượng khay hệ thống
-    ///
-    /// Hàm thực hiện parse tệp biểu tượng từ mảng byte tĩnh được nhúng (`ICON_BYTES`) thông qua các
-    /// hàm `LookupIconIdFromDirectoryEx` và `CreateIconFromResourceEx`
-    fn create_nid() -> NOTIFYICONDATAW {
-        // Tìm offset của biểu tượng phù hợp nhất từ bộ đệm tài nguyên
-        let offset = unsafe {
-            LookupIconIdFromDirectoryEx(ICON_BYTES.as_ptr(), true, 0, 0, LR_DEFAULTCOLOR)
+    fn get_hicon() -> HICON {
+        let bytes = if is_light_theme() {
+            ICON_LIGHT_BYTES
+        } else {
+            ICON_DARK_BYTES
         };
-        let icon_data = &ICON_BYTES[offset as usize..];
-        // Tạo HICON từ dữ liệu thô
-        let hicon = unsafe {
+        let offset =
+            unsafe { LookupIconIdFromDirectoryEx(bytes.as_ptr(), true, 0, 0, LR_DEFAULTCOLOR) };
+        let icon_data = &bytes[offset as usize..];
+        unsafe {
             CreateIconFromResourceEx(icon_data, true, 0x00030000, 0, 0, LR_DEFAULTCOLOR)
                 .expect("Failed to load embedded icon")
-        };
+        }
+    }
+
+    /// Tạo và thiết lập thông tin cấu hình mặc định `NOTIFYICONDATAW` cho biểu tượng khay hệ thống
+    fn create_nid() -> NOTIFYICONDATAW {
+        let hicon = Self::get_hicon();
 
         let mut tooltip: Vec<u16> = "Taskbar Switcher".encode_utf16().collect();
         tooltip.resize(128, 0);

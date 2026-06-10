@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde::Deserialize;
 use std::env;
-use std::fs;
 
 const REPO_URL: &str = "https://api.github.com/repos/congchuahiep/WinGlide/releases/latest";
 
@@ -54,46 +53,4 @@ pub fn check_for_updates() -> Result<Option<UpdateInfo>> {
     }
 
     Ok(None)
-}
-
-pub fn download_and_install(url: &str) -> Result<()> {
-    let mut temp_dir = env::temp_dir();
-    temp_dir.push("WinGlide_update.msi");
-
-    let client = reqwest::blocking::Client::builder()
-        .user_agent("WinGlide-Updater")
-        .build()?;
-
-    let mut response = client.get(url).send()?;
-    if !response.status().is_success() {
-        anyhow::bail!("Failed to download update: {}", response.status());
-    }
-
-    let mut dest = fs::File::create(&temp_dir)?;
-    response.copy_to(&mut dest)?;
-
-    // Chạy file msi bằng ShellExecuteW
-    unsafe {
-        use windows::core::w;
-        use windows::core::PCWSTR;
-        use windows::Win32::UI::Shell::ShellExecuteW;
-        use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-
-        let path_wide: Vec<u16> = temp_dir
-            .to_string_lossy()
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
-
-        let _ = ShellExecuteW(
-            None,
-            w!("open"),
-            PCWSTR(path_wide.as_ptr()),
-            PCWSTR::null(),
-            PCWSTR::null(),
-            SW_SHOWNORMAL,
-        );
-    }
-
-    Ok(())
 }

@@ -20,8 +20,11 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
       - name: Install cargo-wix
-        run: cargo install cargo-wix
+        run: cargo binstall cargo-wix -y
 
       - name: Build project
         run: cargo build --release
@@ -29,6 +32,7 @@ jobs:
       - name: Gather dependencies
         run: |
           New-Item -ItemType Directory -Path dist -Force
+          Copy-Item target\release\WinGlide.exe dist\
           Copy-Item target\release\*.dll dist\
           Copy-Item target\release\*.pri dist\
           Copy-Item target\release\Microsoft.UI.Xaml dist\ -Recurse
@@ -40,16 +44,22 @@ jobs:
           & "${env:WIX}bin\heat.exe" dir dist -cg AppDependencies -dr APPLICATIONFOLDER -scom -sreg -sfrag -srd -gg -var var.DistDir -out wix\dependencies.wxs
 
       - name: Build MSI Installer
-        run: cargo wix --nocapture -p winglide -C -dDistDir=dist -L -sval
+        run: cargo wix --nocapture --no-build -p winglide -C -dDistDir=dist -L -sval
 
       - name: Rename Installer
         run: |
           Move-Item "target\wix\winglide-*.msi" "target\wix\WinGlide-x86_64.msi"
 
+      - name: Create Portable Zip
+        run: |
+          Compress-Archive -Path dist\* -DestinationPath target\wix\WinGlide-Portable-x86_64.zip
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: target\wix\WinGlide-x86_64.msi
+          files: |
+            target\wix\WinGlide-x86_64.msi
+            target\wix\WinGlide-Portable-x86_64.zip
           draft: false
           prerelease: false
         env:

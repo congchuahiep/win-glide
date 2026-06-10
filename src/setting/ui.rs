@@ -11,6 +11,7 @@ use windows::Win32::System::JobObjects::{
     SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows_core::w;
@@ -232,12 +233,8 @@ fn virtual_desktop_settings(cx: &mut RenderCx) -> Element {
     let (config, set_config) = cx.use_state(AppConfig::load());
 
     // Khởi tạo các cờ cho toggle buttons
-    let has_ctrl = config.jump_desktop_modifiers
-        & windows::Win32::UI::Input::KeyboardAndMouse::MOD_CONTROL.0 as u32
-        != 0;
-    let has_alt = config.jump_desktop_modifiers
-        & windows::Win32::UI::Input::KeyboardAndMouse::MOD_ALT.0 as u32
-        != 0;
+    let has_ctrl = config.jump_desktop_modifiers & MOD_CONTROL.0 != 0;
+    let has_alt = config.jump_desktop_modifiers & MOD_ALT.0 != 0;
 
     let update_modifier = {
         let set_config = set_config.clone();
@@ -257,21 +254,11 @@ fn virtual_desktop_settings(cx: &mut RenderCx) -> Element {
 
     let ctrl_btn = toggle_button("Ctrl", has_ctrl).on_changed({
         let update_modifier = update_modifier.clone();
-        move |checked| {
-            update_modifier(
-                windows::Win32::UI::Input::KeyboardAndMouse::MOD_CONTROL.0 as u32,
-                checked,
-            )
-        }
+        move |checked| update_modifier(MOD_CONTROL.0, checked)
     });
     let alt_btn = toggle_button("Alt", has_alt).on_changed({
         let update_modifier = update_modifier.clone();
-        move |checked| {
-            update_modifier(
-                windows::Win32::UI::Input::KeyboardAndMouse::MOD_ALT.0 as u32,
-                checked,
-            )
-        }
+        move |checked| update_modifier(MOD_ALT.0, checked)
     });
 
     let jump_modifiers_action = hstack((ctrl_btn, alt_btn))
@@ -418,53 +405,39 @@ fn update_settings(cx: &mut RenderCx) -> Element {
                 } else {
                     format!("Current version: {}", env!("CARGO_PKG_VERSION"))
                 }),
-                action: Some(
-                    if let Some(info) = update_info.as_ref() {
-                        let url = info.download_url.clone();
-                        button("Update Now")
-                            .on_click(move || {
-                                if crate::updater::download_and_install(&url).is_ok() {
-                                    // Send signal to background app to exit
-                                    unsafe {
-                                        if let Ok(hwnd) = windows::Win32::UI::WindowsAndMessaging::FindWindowW(
-                                            windows::core::w!("WinGlideTray"),
-                                            windows::core::PCWSTR::null(),
-                                        ) {
-                                            if !hwnd.is_invalid() {
-                                                let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                                                    Some(hwnd),
-                                                    windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
-                                                    windows::Win32::Foundation::WPARAM(0),
-                                                    windows::Win32::Foundation::LPARAM(0),
-                                                );
-                                            }
-                                        }
+                action: Some(if let Some(_info) = update_info.as_ref() {
+                    button("Update Now")
+                        .on_click(move || unsafe {
+                            ShellExecuteW(
+                                None,
+                                w!("open"),
+                                w!("https://github.com/congchuahiep/WinGlide/releases/latest"),
+                                None,
+                                None,
+                                SW_SHOWNORMAL,
+                            );
+                        })
+                        .into()
+                } else {
+                    button("Check")
+                        .enabled(!checking)
+                        .on_click({
+                            let set_checking = set_checking.clone();
+                            let set_update_info = set_update_info.clone();
+                            move || {
+                                set_checking.call(true);
+                                let set_checking_clone = set_checking.clone();
+                                let set_update_info_clone = set_update_info.clone();
+                                std::thread::spawn(move || {
+                                    if let Ok(Some(info)) = crate::updater::check_for_updates() {
+                                        set_update_info_clone.call(Some(info));
                                     }
-                                    std::process::exit(0);
-                                }
-                            })
-                            .into()
-                    } else {
-                        button("Check")
-                            .enabled(!checking)
-                            .on_click({
-                                let set_checking = set_checking.clone();
-                                let set_update_info = set_update_info.clone();
-                                move || {
-                                    set_checking.call(true);
-                                    let set_checking_clone = set_checking.clone();
-                                    let set_update_info_clone = set_update_info.clone();
-                                    std::thread::spawn(move || {
-                                        if let Ok(Some(info)) = crate::updater::check_for_updates() {
-                                            set_update_info_clone.call(Some(info));
-                                        }
-                                        set_checking_clone.call(false);
-                                    });
-                                }
-                            })
-                            .into()
-                    }
-                ),
+                                    set_checking_clone.call(false);
+                                });
+                            }
+                        })
+                        .into()
+                }),
                 children: None,
                 always_expand: false,
                 enabled: true,
@@ -480,7 +453,7 @@ fn update_settings(cx: &mut RenderCx) -> Element {
 fn footer() -> Element {
     vstack((
         body_strong("About"),
-        body("Version: 0.0.1"),
+        body(format!("Version: {}", env!("CARGO_PKG_VERSION"))),
         body("Author: @congchuahiep"),
         button("GitHub Repository").on_click(|| unsafe {
             ShellExecuteW(

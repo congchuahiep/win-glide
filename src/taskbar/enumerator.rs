@@ -283,7 +283,7 @@ impl TaskbarEnumerator {
                 );
 
                 Ok(button_map
-                    .find_window_by_button(&target_button)
+                    .find_window_by_button(target_button)
                     .map(|w| TargetWindow {
                         name: w.title,
                         hwnd: w.hwnd,
@@ -291,7 +291,7 @@ impl TaskbarEnumerator {
                     }))
             }
             false => {
-                let windows = button_map.find_windows_by_button(&target_button);
+                let windows = button_map.find_windows_by_button(target_button);
                 let is_grouped = windows.len() > 1;
 
                 Ok(windows.into_iter().next().map(|w| TargetWindow {

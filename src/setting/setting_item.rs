@@ -184,8 +184,7 @@ pub fn setting_item(props: &SettingItemProps, cx: &mut RenderCx) -> Element {
                     right: 38.0,
                     top: 0.0,
                     bottom: 0.0,
-                })
-                .into(),
+                }),
             );
         }
 

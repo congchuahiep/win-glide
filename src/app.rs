@@ -158,22 +158,6 @@ impl App {
     /// Hàm này bắt buộc phải được chạy trên luồng main đã khởi tạo COM dưới dạng STA
     /// (`COINIT_APARTMENTTHREADED`).
     pub unsafe fn run(&mut self, main_thread_id: u32) -> anyhow::Result<()> {
-        std::thread::spawn(|| {
-            if let Ok(Some(update)) = crate::updater::check_for_updates() {
-                tracing::info!("Update available: {}", update.latest_version);
-                unsafe {
-                    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_OK, MB_ICONINFORMATION};
-                    use windows::core::w;
-                    MessageBoxW(
-                        None,
-                        w!("A new version of WinGlide is available! Please open Settings from the system tray to update."),
-                        w!("WinGlide Update"),
-                        MB_OK | MB_ICONINFORMATION,
-                    );
-                }
-            }
-        });
-
         if let Some(indicator) = &mut self.indicator_window {
             indicator.run();
         }
@@ -309,9 +293,30 @@ impl App {
             // Thông điệp đặc biệt từ Windows Explorer thông báo thanh Taskbar đã được tạo lại.
             // Điều này xảy ra khi tiến trình explorer.exe khởi động lại.
             _ if msg == unsafe { WM_TASKBARCREATED } => {
-                info!("TaskbarCreated — re‑registering tray icon");
+                info!("TaskbarCreated, re-registering tray icon");
                 if let Err(e) = self.tray_icon.reregister() {
                     error!("TrayIcon reregister: {e}");
+                }
+                Some(LRESULT(0))
+            }
+
+            // Cập nhật giao diện khi người dùng thay đổi chế độ sáng/tối trong Windows Settings
+            WM_SETTINGCHANGE => {
+                let lparam_str = if lparam.0 != 0 {
+                    unsafe {
+                        let ptr = lparam.0 as *const u16;
+                        let mut len = 0;
+                        while *ptr.add(len) != 0 {
+                            len += 1;
+                        }
+                        String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len))
+                    }
+                } else {
+                    String::new()
+                };
+
+                if lparam_str == "ImmersiveColorSet" {
+                    self.tray_icon.update_theme();
                 }
                 Some(LRESULT(0))
             }

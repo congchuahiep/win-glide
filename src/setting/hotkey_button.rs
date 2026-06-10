@@ -1,10 +1,7 @@
 use std::cell::RefCell;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, VK_CONTROL, VK_ESCAPE, VK_LWIN,
-    VK_MENU, VK_RWIN, VK_SHIFT,
-};
+use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, WH_KEYBOARD_LL,
 };
@@ -35,7 +32,10 @@ pub fn render_hotkey_button(
     let on_capture = std::rc::Rc::new(on_capture);
 
     if is_listening {
-        button("Listening... (Press Esc to cancel)").accent().enabled(enabled).into()
+        button("Listening... (Press Esc to cancel)")
+            .accent()
+            .enabled(enabled)
+            .into()
     } else {
         button(format_hotkey(hotkey.0, hotkey.1))
             .accent()
@@ -77,18 +77,18 @@ where
     MODIFIERS_STATE.with(|m| {
         let mut mods = 0;
         if unsafe { GetAsyncKeyState(VK_CONTROL.0 as i32) } as u16 & 0x8000 != 0 {
-            mods |= MOD_CONTROL.0 as u32;
+            mods |= MOD_CONTROL.0;
         }
         if unsafe { GetAsyncKeyState(VK_MENU.0 as i32) } as u16 & 0x8000 != 0 {
-            mods |= MOD_ALT.0 as u32;
+            mods |= MOD_ALT.0;
         }
         if unsafe { GetAsyncKeyState(VK_SHIFT.0 as i32) } as u16 & 0x8000 != 0 {
-            mods |= MOD_SHIFT.0 as u32;
+            mods |= MOD_SHIFT.0;
         }
         if unsafe { GetAsyncKeyState(VK_LWIN.0 as i32) } as u16 & 0x8000 != 0
             || unsafe { GetAsyncKeyState(VK_RWIN.0 as i32) } as u16 & 0x8000 != 0
         {
-            mods |= MOD_WIN.0 as u32;
+            mods |= MOD_WIN.0;
         }
         *m.borrow_mut() = mods;
     });
@@ -114,10 +114,10 @@ unsafe extern "system" fn hook_proc(n_code: i32, w_param: WPARAM, l_param: LPARA
         let vk = kbd.vkCode;
 
         let mod_flag = match vk {
-            16 | 160 | 161 => MOD_SHIFT.0 as u32,
-            17 | 162 | 163 => MOD_CONTROL.0 as u32,
-            18 | 164 | 165 => MOD_ALT.0 as u32,
-            91 | 92 => MOD_WIN.0 as u32,
+            16 | 160 | 161 => MOD_SHIFT.0,
+            17 | 162 | 163 => MOD_CONTROL.0,
+            18 | 164 | 165 => MOD_ALT.0,
+            91 | 92 => MOD_WIN.0,
             _ => 0,
         };
 
@@ -166,30 +166,30 @@ fn finish_capture(result: Option<(u32, u32)>) {
 /// Chuyển đổi mã VK và Modifier thành chuỗi hiển thị
 pub fn format_hotkey(modifiers: u32, vk: u32) -> String {
     let mut parts = Vec::new();
-    if modifiers & MOD_WIN.0 as u32 != 0 {
+    if modifiers & MOD_WIN.0 != 0 {
         parts.push("Win".to_string());
     }
-    if modifiers & MOD_CONTROL.0 as u32 != 0 {
+    if modifiers & MOD_CONTROL.0 != 0 {
         parts.push("Ctrl".to_string());
     }
-    if modifiers & MOD_ALT.0 as u32 != 0 {
+    if modifiers & MOD_ALT.0 != 0 {
         parts.push("Alt".to_string());
     }
-    if modifiers & MOD_SHIFT.0 as u32 != 0 {
+    if modifiers & MOD_SHIFT.0 != 0 {
         parts.push("Shift".to_string());
     }
 
     let key = match vk {
-        0x30..=0x39 => format!("{}", (vk - 0x30) as u8 as char), // 0-9
-        0x41..=0x5A => format!("{}", vk as u8 as char),          // A-Z
-        219 => "[".to_string(),                                  // VK_OEM_4
-        221 => "]".to_string(),                                  // VK_OEM_6
-        188 => ",".to_string(),                                  // VK_OEM_COMMA
-        190 => ".".to_string(),                                  // VK_OEM_PERIOD
-        191 => "/".to_string(),                                  // VK_OEM_2
-        186 => ";".to_string(),                                  // VK_OEM_1
-        222 => "'".to_string(),                                  // VK_OEM_7
-        192 => "`".to_string(),                                  // VK_OEM_3
+        0x30..=0x39 => format!("{}", (vk - 0x30) as u8 as char),
+        0x41..=0x5A => format!("{}", vk as u8 as char),
+        219 => "[".to_string(),
+        221 => "]".to_string(),
+        188 => ",".to_string(),
+        190 => ".".to_string(),
+        191 => "/".to_string(),
+        186 => ";".to_string(),
+        192 => "`".to_string(),
+        222 => "'".to_string(),
         _ => format!("VK_{}", vk),
     };
 
