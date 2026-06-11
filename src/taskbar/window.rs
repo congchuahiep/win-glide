@@ -1,36 +1,50 @@
 //! Finds windows and reads window properties (AppUserModelID, process name).
 
+use crate::{taskbar::window_context::WindowContext, types::WindowInfo, utils::is_system_class};
 use std::{collections::HashMap, sync::Mutex};
-
-use tracing::instrument;
+use tracing::{debug, instrument};
 use windows::Win32::{
     Foundation::{CloseHandle, HWND, LPARAM, RECT, TRUE},
+    Graphics::{
+        Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED},
+        Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONULL},
+    },
     Storage::EnhancedStorage::PKEY_AppUserModel_ID,
     System::{
-        Com::StructuredStorage::PROPVARIANT,
+        Com::{CoCreateInstance, StructuredStorage::PROPVARIANT, CLSCTX_LOCAL_SERVER},
         Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION},
     },
     UI::{
-        Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow},
+        Shell::{
+            IVirtualDesktopManager,
+            PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow},
+            VirtualDesktopManager,
+        },
         WindowsAndMessaging::{
-            EnumWindows, GetClassNameW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId,
-            IsWindowVisible,
+            EnumWindows, GetClassNameW, GetWindow, GetWindowLongW, GetWindowRect, GetWindowTextW,
+            GetWindowThreadProcessId, IsWindowVisible, GWL_EXSTYLE, GW_OWNER, WS_EX_APPWINDOW,
+            WS_EX_TOOLWINDOW,
         },
     },
 };
 use windows_core::{BOOL, BSTR};
+use winvd::get_desktop_by_window;
 
-use crate::{types::WindowInfo, utils::is_system_class};
-
-struct EnumData {
+struct EnumData<'a> {
     windows: Vec<WindowInfo>,
+    context_filter: Option<&'a WindowContext>,
 }
 
 /// Enumerates all visible windows on the desktop, ignoring system windows.
+///
+/// # Arguments
+///
+/// * `filter` - Optional filter to exclude windows from the result.
 #[instrument(level = "debug", skip_all)]
-pub(super) fn find_visible_windows() -> Vec<WindowInfo> {
+pub(super) fn find_visible_windows(filter: Option<&WindowContext>) -> Vec<WindowInfo> {
     let mut data = EnumData {
         windows: Vec::new(),
+        context_filter: filter,
     };
 
     unsafe {
@@ -43,8 +57,35 @@ pub(super) fn find_visible_windows() -> Vec<WindowInfo> {
     data.windows
 }
 
-unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
+unsafe extern "system" fn enum_windows_callback(
+    hwnd: windows::Win32::Foundation::HWND,
+    lparam: LPARAM,
+) -> BOOL {
     if !IsWindowVisible(hwnd).as_bool() {
+        return TRUE;
+    }
+
+    let mut cloaked = 0u32;
+    let _ = DwmGetWindowAttribute(
+        hwnd,
+        DWMWA_CLOAKED,
+        &mut cloaked as *mut _ as *mut _,
+        std::mem::size_of::<u32>() as u32,
+    );
+    if cloaked != 0 {
+        return TRUE;
+    }
+
+    let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+    let is_tool_window = (ex_style & WS_EX_TOOLWINDOW.0) != 0;
+    let is_app_window = (ex_style & WS_EX_APPWINDOW.0) != 0;
+    let owner = GetWindow(hwnd, GW_OWNER);
+
+    if is_tool_window {
+        return TRUE;
+    }
+
+    if owner.is_ok() && !is_app_window {
         return TRUE;
     }
 
@@ -58,12 +99,30 @@ unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> B
     }
 
     let data = &mut *(lparam.0 as *mut EnumData);
+
+    if let Some(ctx) = data.context_filter {
+        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL).0;
+        if monitor != ctx.monitor.0 {
+            return TRUE;
+        }
+
+        // Use this trick to force the window handle to be a the same HWND as the HWND of `winvd`,
+        // which have different version (0.58) as this project (0.61)
+        let winvd_hwnd = unsafe { std::mem::transmute(hwnd) };
+        let win_desktop = get_desktop_by_window(winvd_hwnd).ok();
+
+        match (win_desktop, ctx.virtual_desktop) {
+            (Some(w_id), Some(ctx_id)) if w_id != ctx_id => return TRUE,
+            _ => {}
+        }
+    }
+
     data.windows.push(find_window_by_hwnd(hwnd));
 
     TRUE
 }
 
-unsafe fn find_window_by_hwnd(hwnd: HWND) -> WindowInfo {
+pub unsafe fn find_window_by_hwnd(hwnd: HWND) -> WindowInfo {
     let mut title_buf = [0u16; 512];
     let len = GetWindowTextW(hwnd, &mut title_buf);
     let title = if len == 0 {

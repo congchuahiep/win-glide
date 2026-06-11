@@ -70,7 +70,7 @@ impl UncombineManager {
     /// The first window (anchor) will keep its original AUMID to not lose its icon.
     #[instrument(level = "debug", skip_all)]
     pub fn uncombine_all(&self) {
-        let windows = find_visible_windows();
+        let windows = find_visible_windows(None);
         let mut map = self.original_aumids.lock().unwrap();
 
         let mut group_counts = HashMap::new();
@@ -136,7 +136,7 @@ impl UncombineManager {
             return;
         }
 
-        let windows = find_visible_windows();
+        let windows = find_visible_windows(None);
         let target_w = windows.iter().find(|w| w.hwnd == hwnd);
         if target_w.is_none() {
             return;

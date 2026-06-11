@@ -9,6 +9,7 @@ mod enumerator;
 mod explorer;
 mod uncombine;
 mod window;
+mod window_context;
 
 pub use enumerator::{CycleDirection, TaskbarEnumerator};
 pub use uncombine::UncombineManager;

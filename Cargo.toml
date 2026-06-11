@@ -50,6 +50,7 @@ features = [
     "Win32_UI_Shell_PropertiesSystem",
     "Win32_Storage_EnhancedStorage",
     "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
     "Win32_Security",
     "Win32_System_JobObjects",
 ]

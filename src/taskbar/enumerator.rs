@@ -53,6 +53,8 @@ use super::button_window::ButtonWindowMap;
 use super::explorer::invalidate_explorer_pid_cache;
 use super::window::find_visible_windows;
 use crate::event::UiaEventHook;
+use crate::taskbar::window::find_window_by_hwnd;
+use crate::taskbar::window_context::{self, WindowContext};
 use crate::types::{TargetWindow, TaskbarButton};
 use crate::utils::truncate;
 
@@ -245,14 +247,48 @@ impl TaskbarEnumerator {
         uncombine_enabled: bool,
         direction: CycleDirection,
     ) -> anyhow::Result<Option<TargetWindow>> {
-        let buttons = self.enumerate_current_monitor_buttons()?;
+        /// Returns the index of the next valid button, or `None` if no valid button is found.
+        fn get_next_valid_button_index(
+            buttons: &[TaskbarButton],
+            button_map: &ButtonWindowMap,
+            source_index: usize,
+            direction: CycleDirection,
+        ) -> Option<usize> {
+            let mut target_index = source_index;
+            let mut attempts = 0;
 
+            loop {
+                attempts += 1;
+                if attempts > buttons.len() {
+                    return None;
+                }
+
+                target_index = match direction {
+                    CycleDirection::Forward => (target_index + 1) % buttons.len(),
+                    CycleDirection::Backward => {
+                        if target_index == 0 {
+                            buttons.len() - 1
+                        } else {
+                            target_index - 1
+                        }
+                    }
+                };
+
+                let target_button = &buttons[target_index];
+                if !button_map.find_windows_by_button(target_button).is_empty() {
+                    return Some(target_index);
+                }
+            }
+        }
+
+        let current_context = WindowContext::current_state();
+        let buttons = self.enumerate_buttons_by_monitor(current_context.monitor)?;
         if buttons.is_empty() {
             return Ok(None);
         }
 
-        let all_windows = find_visible_windows();
-        let button_map = ButtonWindowMap::new(&buttons, &all_windows);
+        let current_monitor_windows = find_visible_windows(Some(&current_context));
+        let button_map = ButtonWindowMap::new(&buttons, &current_monitor_windows);
 
         let source_index = match button_map.find_button_index_by_hwnd(source) {
             Some(i) => {
@@ -266,13 +302,11 @@ impl TaskbarEnumerator {
                 .unwrap_or(0),
         };
 
-        let target_index = match direction {
-            CycleDirection::Forward if source_index + 1 >= buttons.len() => 0,
-            CycleDirection::Forward => source_index + 1,
-            CycleDirection::Backward if source_index == 0 => buttons.len() - 1,
-            CycleDirection::Backward => source_index - 1,
-        };
-
+        let target_index =
+            match get_next_valid_button_index(&buttons, &button_map, source_index, direction) {
+                Some(idx) => idx,
+                None => return Ok(None),
+            };
         let target_button = &buttons[target_index];
 
         match uncombine_enabled {
@@ -328,10 +362,13 @@ impl TaskbarEnumerator {
         hwnds
     }
 
-    /// Returns taskbar buttons on the current monitor (containing the cursor or foreground window).
+    /// Returns taskbar buttons on the current monitor (containing the cursor or foreground window)
     ///
-    /// Cached with a 1-second TTL, invalidated by UIA events or desktop switches.
-    pub fn enumerate_current_monitor_buttons(&self) -> anyhow::Result<Vec<TaskbarButton>> {
+    /// Cached with a 1-second TTL, invalidated by UIA events or desktop switches
+    pub fn enumerate_buttons_by_monitor(
+        &self,
+        monitor: HMONITOR,
+    ) -> anyhow::Result<Vec<TaskbarButton>> {
         if self.desktop_changed() {
             self.invalidate_cache();
         }
@@ -345,24 +382,12 @@ impl TaskbarEnumerator {
         }
 
         unsafe {
-            let mut pt = POINT::default();
-            let hmonitor = GetCursorPos(&mut pt)
-                .map(|_| MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST))
-                .unwrap_or_else(|_| {
-                    let fg = GetForegroundWindow();
-                    if fg.0.is_null() {
-                        HMONITOR::default()
-                    } else {
-                        MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST)
-                    }
-                });
-
             let taskbars = self.taskbars.borrow();
             let target_taskbar = taskbars
                 .iter()
                 .find(|&&hwnd| {
                     let hmonitor_tb = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL);
-                    !hmonitor_tb.is_invalid() && hmonitor_tb.0 == hmonitor.0
+                    !hmonitor_tb.is_invalid() && hmonitor_tb.0 == monitor.0
                 })
                 .copied()
                 .unwrap_or_else(|| *taskbars.first().unwrap_or(&HWND::default()));
