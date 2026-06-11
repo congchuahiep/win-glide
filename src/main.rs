@@ -102,7 +102,7 @@ fn main() {
 /// This function determines the application's run mode:
 /// - `ConsoleWorker`: Runs the detached debug console worker process.
 /// - `SettingsUi`: Launches the XAML-based settings interface.
-/// - `BackgroundApp`: Starts the main background taskbar switcher engine.
+/// - `BackgroundApp`: Starts the main background WinGlide engine.
 ///
 /// It also handles single-instance enforcement, logger initialization, and DPI awareness.
 fn dispatch() -> anyhow::Result<()> {
@@ -139,7 +139,7 @@ fn dispatch() -> anyhow::Result<()> {
                 unsafe {
                     app.run(windows::Win32::System::Threading::GetCurrentThreadId())?;
                 }
-                tracing::info!("Taskbar Switcher stopped");
+                tracing::info!("WinGlide stopped");
             }
         }
     }

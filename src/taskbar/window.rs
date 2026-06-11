@@ -1,6 +1,10 @@
 //! Finds windows and reads window properties (AppUserModelID, process name).
 
-use crate::{taskbar::window_context::WindowContext, types::WindowInfo, utils::is_system_class};
+use crate::{
+    taskbar::{aumid::get_aumid, window_context::WindowContext},
+    types::WindowInfo,
+    utils::is_system_class,
+};
 use std::{collections::HashMap, sync::Mutex};
 use tracing::{debug, instrument};
 use windows::Win32::{
@@ -9,26 +13,16 @@ use windows::Win32::{
         Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED},
         Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONULL},
     },
-    Storage::EnhancedStorage::PKEY_AppUserModel_ID,
-    System::{
-        Com::{CoCreateInstance, StructuredStorage::PROPVARIANT, CLSCTX_LOCAL_SERVER},
-        Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION},
+    System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
     },
-    UI::{
-        Shell::{
-            IVirtualDesktopManager,
-            PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow},
-            VirtualDesktopManager,
-        },
-        WindowsAndMessaging::{
-            EnumWindows, GetClassNameW, GetWindow, GetWindowLongW, GetWindowRect, GetWindowTextW,
-            GetWindowThreadProcessId, IsWindowVisible, GWL_EXSTYLE, GW_OWNER, WS_EX_APPWINDOW,
-            WS_EX_TOOLWINDOW,
-        },
+    UI::WindowsAndMessaging::{
+        EnumWindows, GetClassNameW, GetWindow, GetWindowLongW, GetWindowRect, GetWindowTextW,
+        GetWindowThreadProcessId, IsWindowVisible, GWL_EXSTYLE, GW_OWNER, WS_EX_APPWINDOW,
+        WS_EX_TOOLWINDOW,
     },
 };
-use windows_core::{BOOL, BSTR};
-use winvd::get_desktop_by_window;
+use windows_core::BOOL;
 
 struct EnumData<'a> {
     windows: Vec<WindowInfo>,
@@ -52,6 +46,10 @@ pub(super) fn find_visible_windows(filter: Option<&WindowContext>) -> Vec<Window
             Some(enum_windows_callback),
             LPARAM(&mut data as *mut _ as isize),
         );
+    }
+
+    for window in &mut data.windows {
+        debug!("{:?}", window);
     }
 
     data.windows
@@ -101,19 +99,26 @@ unsafe extern "system" fn enum_windows_callback(
     let data = &mut *(lparam.0 as *mut EnumData);
 
     if let Some(ctx) = data.context_filter {
+        // Check if the window is on the same monitor as the context
         let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL).0;
         if monitor != ctx.monitor.0 {
             return TRUE;
         }
 
-        // Use this trick to force the window handle to be a the same HWND as the HWND of `winvd`,
-        // which have different version (0.58) as this project (0.61)
+        // Check if this window is on the same virtual desktop as the context
+        //
+        // Use `transmute` trick to force the window handle to be a the same HWND as the HWND of
+        // `winvd`, which have different version (0.58) as this project (0.61)
         let winvd_hwnd = unsafe { std::mem::transmute(hwnd) };
-        let win_desktop = get_desktop_by_window(winvd_hwnd).ok();
+        let is_showed_all_desktop = winvd::is_pinned_window(winvd_hwnd).map_or(false, |r| r);
 
-        match (win_desktop, ctx.virtual_desktop) {
-            (Some(w_id), Some(ctx_id)) if w_id != ctx_id => return TRUE,
-            _ => {}
+        if !is_showed_all_desktop {
+            let win_desktop = winvd::get_desktop_by_window(winvd_hwnd).ok();
+
+            match (win_desktop, ctx.virtual_desktop) {
+                (Some(w_id), Some(ctx_id)) if w_id != ctx_id => return TRUE,
+                _ => {}
+            }
         }
     }
 
@@ -122,6 +127,7 @@ unsafe extern "system" fn enum_windows_callback(
     TRUE
 }
 
+#[instrument(level = "debug", skip_all)]
 pub unsafe fn find_window_by_hwnd(hwnd: HWND) -> WindowInfo {
     let mut title_buf = [0u16; 512];
     let len = GetWindowTextW(hwnd, &mut title_buf);
@@ -142,14 +148,13 @@ pub unsafe fn find_window_by_hwnd(hwnd: HWND) -> WindowInfo {
     };
     let _ = GetWindowRect(hwnd, &mut rect);
 
-    let process_name = get_process_name(pid);
-
     WindowInfo {
         hwnd,
         title,
         rect,
-        process_name,
         process_id: pid,
+        process_name: get_process_name(pid),
+        aumid: get_aumid(hwnd),
     }
 }
 
@@ -203,37 +208,4 @@ fn get_process_name(pid: u32) -> String {
     }
 
     name
-}
-
-/// Gets AppUserModelID from a window via `SHGetPropertyStoreForWindow`.
-///
-/// This is the official mechanism Windows uses to group taskbar buttons.
-pub(super) fn get_app_user_model_id(hwnd: HWND) -> Option<String> {
-    unsafe {
-        let store: IPropertyStore = match SHGetPropertyStoreForWindow(hwnd) {
-            Ok(s) => s,
-            Err(_) => return None,
-        };
-
-        let variant: PROPVARIANT = match store.GetValue(&PKEY_AppUserModel_ID) {
-            Ok(v) => v,
-            Err(_) => return None,
-        };
-
-        if variant.is_empty() {
-            return None;
-        }
-
-        let bstr = match BSTR::try_from(&variant) {
-            Ok(b) => b,
-            Err(_) => return None,
-        };
-
-        let s = bstr.to_string();
-        if s.is_empty() {
-            None
-        } else {
-            Some(s)
-        }
-    }
 }

@@ -5,6 +5,7 @@ use windows::Win32::{
 };
 use winvd::{get_current_desktop, Desktop};
 
+#[allow(dead_code)]
 /// The context of something in Windows? (can you get a better name?) Including the
 /// foreground window, monitor, and virtual desktop.
 pub struct WindowContext {

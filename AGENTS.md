@@ -1,4 +1,4 @@
-# AGENTS.md - Taskbar Switcher
+# AGENTS.md - WinGlide
 
 ## Project summary
 

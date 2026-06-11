@@ -42,7 +42,7 @@ pub fn parse_args() -> Args {
 
 pub fn print_help(args: &Args) {
     let mut info = String::from(
-        "\nTaskbar Switcher started:\
+        "\nWinGlide started:\
         \n\tAlt+[  : cycle left\
         \n\tAlt+]  : cycle right\
         \n\tRight-click tray icon : menu\

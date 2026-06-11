@@ -27,10 +27,8 @@ use std::cell::{Cell, RefCell};
 use std::time::Instant;
 use tracing::{debug, error, instrument, warn};
 use windows::core::w;
-use windows::Win32::Foundation::{HWND, POINT};
-use windows::Win32::Graphics::Gdi::{
-    MonitorFromPoint, MonitorFromWindow, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTONULL,
-};
+use windows::Win32::Foundation::HWND;
+use windows::Win32::Graphics::Gdi::{MonitorFromWindow, HMONITOR, MONITOR_DEFAULTTONULL};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, CLSCTX_LOCAL_SERVER,
     COINIT_APARTMENTTHREADED,
@@ -44,17 +42,14 @@ use windows::Win32::UI::Accessibility::{
 };
 use windows::Win32::UI::Shell::IVirtualDesktopManager;
 use windows::Win32::UI::Shell::VirtualDesktopManager;
-use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowExW, FindWindowW, GetCursorPos, GetForegroundWindow,
-};
+use windows::Win32::UI::WindowsAndMessaging::{FindWindowExW, FindWindowW, GetForegroundWindow};
 
 use super::activate::force_activate;
 use super::button_window::ButtonWindowMap;
 use super::explorer::invalidate_explorer_pid_cache;
 use super::window::find_visible_windows;
 use crate::event::UiaEventHook;
-use crate::taskbar::window::find_window_by_hwnd;
-use crate::taskbar::window_context::{self, WindowContext};
+use crate::taskbar::window_context::WindowContext;
 use crate::types::{TargetWindow, TaskbarButton};
 use crate::utils::truncate;
 
@@ -153,8 +148,8 @@ impl TaskbarEnumerator {
 
     /// Registers UIA StructureChanged event handler on taskbar elements.
     ///
-    /// Called once from `App::run()`. After explorer restarts, [`Self::refresh_taskbar_hwnd`] automatically
-    /// re-subscribes.
+    /// Called once from `App::run()`. After explorer restarts, [`Self::refresh_taskbar_hwnd`]
+    /// automatically re-subscribes.
     pub fn install_uia_hook(&self, main_thread_id: u32) -> anyhow::Result<()> {
         self.uia_thread_id.set(main_thread_id);
         let taskbars = self.taskbars.borrow();
@@ -172,10 +167,10 @@ impl TaskbarEnumerator {
 
     /// Self-recovers after explorer.exe crashes and restarts.
     ///
-    /// NOTE: This logic is called at [`Self::enumerate_buttons`], which might sound incorrect because
-    /// this method should ideally be called when the explorer restart event occurs. The reason for not
-    /// choosing that approach is because it's a bit cumbersome, but in the future it's still better to catch the event
-    /// instead of calling it manually.
+    /// NOTE: This logic is called at [`Self::enumerate_buttons`], which might sound incorrect
+    /// because this method should ideally be called when the explorer restart event occurs. The
+    /// reason for not that approach is because it's a bit cumbersome, but in the future it's still
+    /// better to catch the event instead of calling it manually.
     pub fn refresh_taskbar_hwnd(&self) -> anyhow::Result<()> {
         let taskbars = Self::get_all_taskbar_hwnds();
         if taskbars.is_empty() {
@@ -227,7 +222,7 @@ impl TaskbarEnumerator {
 
                 let ok = unsafe { force_activate(target.hwnd) };
                 if !ok {
-                    warn!("force_activate returned false");
+                    warn!("Cannot activate window '{}'", truncate(&target.name, 30),);
                 }
             }
             None => warn!("No window found to cycle to"),
@@ -309,21 +304,24 @@ impl TaskbarEnumerator {
             };
         let target_button = &buttons[target_index];
 
-        match uncombine_enabled {
-            true => {
-                debug!(
-                    "Target button [{}]: '{}' AUMID '{:?}'",
-                    target_index, target_button.name, target_button.automation_id
-                );
+        debug!(
+            "Source button [{}]: '{}' AUMID '{:?}'",
+            source_index, buttons[source_index].name, buttons[source_index].automation_id
+        );
 
-                Ok(button_map
-                    .find_window_by_button(target_button)
-                    .map(|w| TargetWindow {
-                        name: w.title,
-                        hwnd: w.hwnd,
-                        is_grouped: false,
-                    }))
-            }
+        debug!(
+            "Target button [{}]: '{}' AUMID '{:?}'",
+            target_index, target_button.name, target_button.automation_id
+        );
+
+        match uncombine_enabled {
+            true => Ok(button_map
+                .find_window_by_button(target_button)
+                .map(|w| TargetWindow {
+                    name: w.title,
+                    hwnd: w.hwnd,
+                    is_grouped: false,
+                })),
             false => {
                 let windows = button_map.find_windows_by_button(target_button);
                 let is_grouped = windows.len() > 1;

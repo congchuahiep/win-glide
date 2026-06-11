@@ -4,6 +4,7 @@
 //! mapping buttons to windows, activating windows, and uncombining buttons.
 
 mod activate;
+mod aumid;
 mod button_window;
 mod enumerator;
 mod explorer;

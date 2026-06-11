@@ -1,7 +1,7 @@
 //! Handles application bootstrap routines.
 //!
-//! This module includes functions responsible for initial application setup such as 
-//! enforcing single-instance restrictions via Mutex, attaching debug consoles, 
+//! This module includes functions responsible for initial application setup such as
+//! enforcing single-instance restrictions via Mutex, attaching debug consoles,
 //! and setting up DPI awareness for modern Windows displays.
 
 use std::sync::atomic::Ordering;
@@ -15,7 +15,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 /// Specifies the type of application instance to check for uniqueness.
 pub enum InstanceType {
-    /// The invisible background taskbar switcher engine.
+    /// The invisible background WinGlide engine.
     Background,
     /// The foreground XAML settings user interface.
     SettingsUI,

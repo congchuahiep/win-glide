@@ -33,7 +33,7 @@ static mut WM_TASKBARCREATED: u32 = 0;
 /// Constant identifier for the message the system tray sends to the hidden window.
 const WM_USER_TRAYICON: u32 = WM_USER + 0x200;
 
-/// Represents the entire state of the Taskbar Switcher application.
+/// Represents the entire state of the WinGlide application.
 ///
 /// This struct maintains hardware and software connections, including event hooks,
 /// hotkeys, system tray, and Win32 hidden window information to listen to system messages.

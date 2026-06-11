@@ -138,7 +138,7 @@ impl TrayIcon {
     fn create_nid() -> NOTIFYICONDATAW {
         let hicon = Self::get_hicon();
 
-        let mut tooltip: Vec<u16> = "Taskbar Switcher".encode_utf16().collect();
+        let mut tooltip: Vec<u16> = "WinGlide".encode_utf16().collect();
         tooltip.resize(128, 0);
         let tooltip: [u16; 128] = tooltip.try_into().expect("tooltip too long");
 

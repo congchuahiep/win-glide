@@ -16,19 +16,13 @@
 //! 3. App exit (Ctrl+C) -> restore_all() restores original AUMID
 //! ```
 
+use super::window::find_visible_windows;
+use crate::taskbar::aumid::{get_aumid, set_aumid};
+use crate::utils::truncate;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tracing::{debug, error, instrument};
-use windows::core::HSTRING;
 use windows::Win32::Foundation::HWND;
-use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
-use windows::Win32::System::Com::StructuredStorage::{
-    InitPropVariantFromStringAsVector, PROPVARIANT,
-};
-use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
-
-use super::window::{find_visible_windows, get_app_user_model_id};
-use crate::utils::truncate;
 
 /// Manages uncombine: saves original AUMID and sets unique AUMID for each window.
 ///
@@ -55,8 +49,8 @@ impl UncombineManager {
 
     /// Checks if a window is already tracked by uncombine.
     ///
-    /// Used in WinEvent callback for quick filtering before posting message to avoid sending useless
-    /// messages for already uncombined windows.
+    /// Used in WinEvent callback for quick filtering before posting message to avoid sending
+    /// useless  messages for already uncombined windows.
     pub fn is_tracked(&self, hwnd: HWND) -> bool {
         self.original_aumids
             .lock()
@@ -66,8 +60,8 @@ impl UncombineManager {
 
     /// Uncombines **all** visible windows on the desktop.
     ///
-    /// Only uncombines when 2 or more windows of the same app (same AUMID or process name) are detected.
-    /// The first window (anchor) will keep its original AUMID to not lose its icon.
+    /// Only uncombines when 2 or more windows of the same app (same AUMID or process name) are
+    /// detected. The first window (anchor) will keep its original AUMID to not lose its icon.
     #[instrument(level = "debug", skip_all)]
     pub fn uncombine_all(&self) {
         let windows = find_visible_windows(None);
@@ -77,7 +71,7 @@ impl UncombineManager {
         let mut window_keys = Vec::new();
 
         for w in &windows {
-            let key = match get_app_user_model_id(w.hwnd) {
+            let key = match get_aumid(w.hwnd) {
                 Some(aumid) => format!("AUMID:{}", aumid),
                 None => format!("EXE:{}", w.process_name),
             };
@@ -104,7 +98,7 @@ impl UncombineManager {
                 continue;
             }
 
-            let original = get_app_user_model_id(w.hwnd);
+            let original = get_aumid(w.hwnd);
             let new_aumid = format!("TaskbarSwitcher_{}", hwnd_val);
             map.insert(hwnd_val, original.clone());
 
@@ -143,14 +137,14 @@ impl UncombineManager {
         }
         let target_w = target_w.unwrap();
 
-        let target_key = match get_app_user_model_id(hwnd) {
+        let target_key = match get_aumid(hwnd) {
             Some(aumid) => format!("AUMID:{}", aumid),
             None => format!("EXE:{}", target_w.process_name),
         };
 
         let mut count = 0;
         for w in &windows {
-            let key = match get_app_user_model_id(w.hwnd) {
+            let key = match get_aumid(w.hwnd) {
                 Some(aumid) => format!("AUMID:{}", aumid),
                 None => format!("EXE:{}", w.process_name),
             };
@@ -167,7 +161,7 @@ impl UncombineManager {
             return;
         }
 
-        let original = get_app_user_model_id(hwnd);
+        let original = get_aumid(hwnd);
         let new_aumid = format!("TaskbarSwitcher_{}", hwnd_val);
         map.insert(hwnd_val, original.clone());
 
@@ -210,17 +204,5 @@ impl UncombineManager {
 impl Drop for UncombineManager {
     fn drop(&mut self) {
         self.restore_all();
-    }
-}
-
-/// Sets the AppUserModelID for a window.
-fn set_aumid(hwnd: HWND, aumid: Option<&str>) -> Result<(), windows::core::Error> {
-    unsafe {
-        let store: IPropertyStore = SHGetPropertyStoreForWindow(hwnd)?;
-        let prop = match aumid {
-            Some(s) => InitPropVariantFromStringAsVector(&HSTRING::from(s))?,
-            None => PROPVARIANT::default(),
-        };
-        store.SetValue(&PKEY_AppUserModel_ID, &prop)
     }
 }

@@ -61,7 +61,7 @@ pub fn run_worker() {
     }
 
     // Set the window title
-    let title = "Debug Console - Taskbar Switcher";
+    let title = "Debug Console - WinGlide";
     let mut title_u16: Vec<u16> = title.encode_utf16().collect();
     title_u16.push(0);
     unsafe {

@@ -19,7 +19,7 @@ pub struct TaskbarButton {
     /// PID of the process owning the button (usually explorer.exe on Win11)
     pub process_id: i32,
 
-    /// Automation ID from UIA, which is the AppUserModelID 99% of the time
+    /// Automation ID from UIA, which is the AppUserModelID 70% of the time?
     pub automation_id: Option<String>,
 }
 
@@ -40,6 +40,9 @@ pub struct WindowInfo {
 
     /// Executable file name (e.g., "chrome.exe")
     pub process_name: String,
+
+    /// AppUserModelID (AUMID) of the window
+    pub aumid: Option<String>,
 }
 
 /// A target window in the cycle list.
