@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use tracing::{debug, error, instrument};
 use windows::Win32::Foundation::HWND;
 
-use super::explorer;
+use crate::win32::explorer;
 use crate::{
     types::{TaskbarButton, WindowInfo},
     utils,
@@ -41,14 +41,12 @@ impl<'a> ButtonWindowMap<'a> {
             let mut assigned_windows = Vec::new();
 
             for w in candidates {
-                // NẾU CỬA SỔ NÀY CHƯA AI LẤY
                 if !consumed_hwnds.contains(&w.hwnd.0) {
                     assigned_windows.push(w.clone());
-                    consumed_hwnds.insert(w.hwnd.0); // ĐÁNH DẤU ĐÃ LẤY!
+                    consumed_hwnds.insert(w.hwnd.0);
                 }
             }
 
-            // Gắn danh sách cửa sổ hợp pháp vào Button này
             this.mapping.insert(i, assigned_windows);
         }
 
@@ -60,13 +58,11 @@ impl<'a> ButtonWindowMap<'a> {
         &self,
         target_button: &TaskbarButton,
     ) -> Option<WindowInfo> {
-        // Tra cứu xem target_button nằm ở index thứ mấy
         if let Some(pos) = self
             .buttons
             .iter()
             .position(|b| std::ptr::eq(b, target_button))
         {
-            // Trả về danh sách cửa sổ đã được chia từ trước
             if let Some(assigned) = self.mapping.get(&pos) {
                 return assigned.iter().next().cloned();
             }
@@ -77,13 +73,11 @@ impl<'a> ButtonWindowMap<'a> {
 
     /// Finds all windows corresponding to the button. Used for combine mode (grouped buttons).
     pub(super) fn find_windows_by_button(&self, target_button: &TaskbarButton) -> Vec<WindowInfo> {
-        // Tra cứu xem target_button nằm ở index thứ mấy
         if let Some(pos) = self
             .buttons
             .iter()
             .position(|b| std::ptr::eq(b, target_button))
         {
-            // Trả về danh sách cửa sổ đã được chia từ trước
             if let Some(assigned) = self.mapping.get(&pos) {
                 return assigned.clone();
             }

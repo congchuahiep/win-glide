@@ -20,7 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use crate::config::AppConfig;
 use crate::event::{self, InvalidateSource};
 use crate::hotkey::{HotkeyAction, HotkeyManager};
-use crate::indicator::IndicatorWindow;
+use crate::virtual_desktop::indicator::IndicatorWindow;
 use crate::logging::console::{self, CONSOLE_VISIBLE};
 use crate::setting;
 use crate::taskbar::{CycleDirection, TaskbarEnumerator, UncombineManager};

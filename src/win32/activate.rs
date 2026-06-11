@@ -16,7 +16,7 @@ use windows::Win32::{
 /// Tries SetForegroundWindow first, if it fails, uses AttachThreadInput to attach the foreground thread
 /// to the current thread.
 #[instrument(level = "debug", skip_all)]
-pub(super) unsafe fn force_activate(target: HWND) -> bool {
+pub(crate) unsafe fn force_activate(target: HWND) -> bool {
     let foreground = GetForegroundWindow();
     if foreground == target {
         return true;

@@ -1,7 +1,7 @@
 //! Finds windows and reads window properties (AppUserModelID, process name).
 
 use crate::{
-    taskbar::{aumid::get_aumid, window_context::WindowContext},
+    win32::{aumid::get_aumid, window_context::WindowContext},
     types::WindowInfo,
     utils::is_system_class,
 };
@@ -35,7 +35,7 @@ struct EnumData<'a> {
 ///
 /// * `filter` - Optional filter to exclude windows from the result.
 #[instrument(level = "debug", skip_all)]
-pub(super) fn find_visible_windows(filter: Option<&WindowContext>) -> Vec<WindowInfo> {
+pub(crate) fn find_visible_windows(filter: Option<&WindowContext>) -> Vec<WindowInfo> {
     let mut data = EnumData {
         windows: Vec::new(),
         context_filter: filter,

@@ -26,7 +26,6 @@ pub fn parse_args() -> Args {
 
     args.debug = raw.iter().any(|a| a == "--debug");
     args.verbose = raw.iter().any(|a| a == "-v" || a == "--verbose");
-    args.combine_enabled = raw.iter().any(|a| a == "--combine-mode");
     args.reopen_ui = raw.iter().any(|a| a == "--reopen-ui");
 
     if raw.iter().any(|a| a == "--console-worker") {
@@ -48,7 +47,6 @@ pub fn print_help(args: &Args) {
         \n\tRight-click tray icon : menu\
         \n\
         \n\t-v/--verbose: enable debug logging\
-        \n\t--combine-mode: enable combine mode\
         \n\t--debug: attach console for debugging",
     );
 

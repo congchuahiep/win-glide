@@ -14,7 +14,6 @@ mod cli;
 mod config;
 mod event;
 mod hotkey;
-mod indicator;
 mod logging;
 mod setting;
 mod taskbar;
@@ -22,6 +21,8 @@ mod tray_icon;
 mod types;
 mod updater;
 mod utils;
+mod virtual_desktop;
+mod win32;
 
 /// Displays a fatal error message box to the user.
 ///

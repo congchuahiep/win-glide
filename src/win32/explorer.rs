@@ -10,7 +10,7 @@ use tracing::debug;
 ///
 /// The cache is valid until [`invalidate_explorer_pid_cache`] is called
 /// (from `TaskbarEnumerator::refresh_taskbar_hwnd` when explorer restarts).
-pub(super) fn get_explorer_pid() -> u32 {
+pub(crate) fn get_explorer_pid() -> u32 {
     if EXPLORER_PID_VALID.load(Ordering::Relaxed) {
         return EXPLORER_PID_CACHE.load(Ordering::Relaxed);
     }
@@ -37,7 +37,7 @@ pub(super) fn get_explorer_pid() -> u32 {
 }
 
 /// Invalidates the explorer PID cache - called when explorer restarts.
-pub(super) fn invalidate_explorer_pid_cache() {
+pub(crate) fn invalidate_explorer_pid_cache() {
     EXPLORER_PID_VALID.store(false, Ordering::Relaxed);
     debug!("Explorer PID cache invalidated");
 }
