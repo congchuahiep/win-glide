@@ -1,6 +1,6 @@
 [package]
 name = "winglide"
-version = "0.0.4"
+version = "0.0.5"
 authors = ["congchuahiep"]
 description = "A simple tool to improve Windows 11 navigation smoother: cycle taskbar buttons, uncombine taskbar buttons, jump to desktop,..."
 license = "MIT"
