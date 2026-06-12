@@ -111,8 +111,49 @@
                             KeyPath='yes'
                         />
                     </Component>
+
+                    <Component Id="ApplicationShortcut" Guid="*">
+                        <Shortcut
+                            Id="ApplicationStartMenuShortcut"
+                            Name="WinGlide"
+                            Description="A simple tool to improve Windows 11 navigation"
+                            Target="[#exe0]"
+                            WorkingDirectory="APPLICATIONFOLDER"
+                            Directory="ApplicationProgramsFolder"
+                        />
+
+                        <Shortcut
+                            Id="ApplicationDesktopShortcut"
+                            Name="WinGlide"
+                            Description="A simple tool to improve Windows 11 navigation"
+                            Target="[#exe0]"
+                            WorkingDirectory="APPLICATIONFOLDER"
+                            Directory="DesktopFolder"
+                        />
+
+                        <RemoveFolder
+                            Id="CleanUpShortCut"
+                            Directory="ApplicationProgramsFolder"
+                            On="uninstall"
+                        />
+
+                        <RegistryValue
+                            Root="HKCU"
+                            Key="Software\congchuahiep\WinGlide"
+                            Name="installed"
+                            Type="integer"
+                            Value="1"
+                            KeyPath="yes"
+                        />
+                    </Component>
                 </Directory>
             </Directory>
+
+            <Directory Id="ProgramMenuFolder">
+                <Directory Id="ApplicationProgramsFolder" Name="WinGlide" />
+            </Directory>
+
+            <Directory Id="DesktopFolder" Name="Desktop" />
         </Directory>
 
 
@@ -129,6 +170,7 @@
 
             <ComponentRef Id='License' />
             <ComponentRef Id='binary0' />
+            <ComponentRef Id="ApplicationShortcut" />
             <ComponentGroupRef Id='AppDependencies' />
         </Feature>
 
@@ -153,6 +195,20 @@
             Value='https://github.com/congchuahiep/WinGlide'
         />
 
+        <Property
+            Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT"
+            Value="Launch WinGlide"
+        />
+        <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+        <CustomAction
+            Id="LaunchApplication"
+            FileKey="exe0"
+            ExeCommand=""
+            Execute="immediate"
+            Impersonate="yes"
+            Return="asyncNoWait"
+        />
+
         <UI>
             <UIRef Id='WixUI_FeatureTree' />
             <!--
@@ -165,6 +221,7 @@
             <!--<Publish Dialog='WelcomeDlg' Control='Next' Event='NewDialog' Value='CustomizeDlg' Order='99'>1</Publish>-->
             <!--<Publish Dialog='CustomizeDlg' Control='Back' Event='NewDialog' Value='WelcomeDlg' Order='99'>1</Publish>-->
 
+            <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" />
         </UI>
 
         <!--
